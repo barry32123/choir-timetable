@@ -3,143 +3,157 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Choir Timetable Generator</title>
+  <title>St. Mary's Choir Timetable Generator</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 20px; background: #f9f9f9; }
-    textarea { width: 100%; height: 300px; margin-top: 10px; }
-    button { padding: 10px 15px; margin: 10px 0; }
-    .log-entry { font-size: 0.9em; color: #555; border-top: 1px solid #ccc; padding: 5px 0; }
+    body { font-family: Arial, sans-serif; padding: 20px; background: #f0f2f5; }
+    h1 { color: #2c3e50; }
+    button { padding: 10px 20px; font-size: 16px; margin: 10px 0; }
+    pre { white-space: pre-wrap; background: #fff; padding: 20px; border: 1px solid #ccc; border-radius: 8px; }
+    .log { margin-top: 20px; background: #eee; padding: 10px; border-radius: 6px; max-height: 200px; overflow-y: auto; }
   </style>
 </head>
 <body>
   <h1>St. Mary's Choir Timetable Generator</h1>
   <button onclick="generateTimetable()">Generate Timetable</button>
-  <button onclick="copyOutput()">Copy Output</button>
-  <textarea id="output" readonly></textarea>
-  <h2>Generation Log</h2>
-  <div id="log"></div>
+  <button onclick="copyTimetable()">Copy Timetable</button>
+  <pre id="output"></pre>
+  <div class="log">
+    <h3>Generation Log</h3>
+    <ul id="log"></ul>
+  </div>
 
-  <script>
-    const maleSingers = ["seby", "sebastian", "roy", "phijo", "shaji", "robert", "don", "aibel", "atul"];
-    const femaleSingers = ["anu", "angel", "jemcy", "sini", "priya", "dona", "soyal", "jincy", "biji", "christy", "sneha"];
-    const keyboardists = ["abraham sn", "abraham jr", "davis"];
-    const hybridKeyboardists = ["sebastian", "shaji"];
-    const allKeyboardists = [...keyboardists, ...hybridKeyboardists];
+<script>
+const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const massSchedule = {
+  Monday: ["5:30am", "7am"],
+  Tuesday: ["5:30am", "7am"],
+  Wednesday: ["5:30am", "7am"],
+  Thursday: ["5:30am", "7am"],
+  Friday: ["5:30am", "7am", "10am", "5:30pm"],
+  Saturday: ["5:30am", "7am"],
+  Sunday: ["5:30am", "7am", "10am", "5pm"]
+};
+const keyboardMasses = {
+  Friday: ["7am", "10am", "5:30pm"],
+  Saturday: ["7am"],
+  Sunday: ["7am", "10am", "5pm"]
+};
+const maleSingers = ["seby", "sebastian", "roy", "phijo", "shaji", "robert", "don", "aibel", "atul"];
+const femaleSingers = ["anu", "angel", "jemcy", "sini", "priya", "dona", "soyal", "jincy", "biji", "christy", "sneha"];
+const keyboardists = ["abraham sn", "abraham jr", "davis"];
+const hybrid = ["sebastian", "shaji"];
+const hybridsLimit = {};
+const memberAssignments = {}; // Tracks all assignments
+const weeklyCount = {}; // Tracks weekly assignment count
 
-    const weekDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const friday10amExceptions = ["atul", "aibel", "angel", "sneha", "soyal", "christy", "dona", "abraham jr", "abraham sn", "jemcy"];
+const only530 = ["seby", "jincy", "biji"];
 
-    const masses = {
-      Monday: ["5:30am", "7am"],
-      Tuesday: ["5:30am", "7am"],
-      Wednesday: ["5:30am", "7am"],
-      Thursday: ["5:30am", "7am"],
-      Friday: ["5:30am", "7am", "10am", "5:30pm"],
-      Saturday: ["5:30am", "7am"],
-      Sunday: ["5:30am", "7am", "10am", "5pm"]
-    };
+function shuffle(arr) {
+  return [...arr].sort(() => Math.random() - 0.5);
+}
 
-    const keyboardMasses = {
-      Friday: ["7am", "10am", "5:30pm"],
-      Saturday: ["7am"],
-      Sunday: ["7am", "10am", "5pm"]
-    };
+function pickMembers(day, time, ratio, usedToday) {
+  const males = shuffle(maleSingers.filter(n => !usedToday.has(n) && (!only530.includes(n) || time === "5:30am")));
+  const females = shuffle(femaleSingers.filter(n => !usedToday.has(n) && (!only530.includes(n) || time === "5:30am")));
 
-    const fr10Exclusions = ["atul", "aibel", "angel", "sneha", "soyal", "christy", "dona", "abraham jr", "abraham sn", "jemcy"];
-    const only530 = ["seby", "jincy", "biji"];
+  let m = [], f = [];
+  if (ratio === "1m1f") {
+    m = males.slice(0, 1);
+    f = females.slice(0, 1);
+  } else if (ratio === "1m2f") {
+    m = males.slice(0, 1);
+    f = females.slice(0, 2);
+  } else {
+    m = males.slice(0, 2);
+    f = females.slice(0, 2);
+  }
 
-    let assignmentLog = [];
-    let hybridWeeklyCount = { sebastian: 0, shaji: 0 };
-    let dailyAssignments = {};
+  return [...m, ...f];
+}
 
-    function shuffle(arr) {
-      return arr.sort(() => Math.random() - 0.5);
+function assignKeyboard(day, time, usedToday) {
+  if (!keyboardMasses[day] || !keyboardMasses[day].includes(time)) return null;
+  const priority = ["davis", "abraham sn", "abraham jr"];
+  const pool = [...priority, ...hybrid];
+  for (let name of pool) {
+    if (usedToday.has(name)) continue;
+    if (hybrid.includes(name)) {
+      if (!hybridsLimit[name]) hybridsLimit[name] = 0;
+      if (hybridsLimit[name] >= 1) continue;
+      hybridsLimit[name]++;
     }
+    usedToday.add(name);
+    countMember(name);
+    return name;
+  }
+  return null;
+}
 
-    function isKeyboardMass(day, time) {
-      return keyboardMasses[day]?.includes(time);
-    }
+function countMember(name) {
+  if (!weeklyCount[name]) weeklyCount[name] = 0;
+  weeklyCount[name]++;
+}
 
-    function getRandomRatio(day, time) {
-      if (time === "5:30am") return [1, 1];
-      const options = [[1, 1], [1, 2], [2, 2]];
-      return options[Math.floor(Math.random() * options.length)];
-    }
+function generateTimetable() {
+  const output = [];
+  const dayAssignment = {};
+  Object.keys(memberAssignments).forEach(k => memberAssignments[k] = 0);
+  Object.keys(hybridsLimit).forEach(k => hybridsLimit[k] = 0);
+  Object.keys(weeklyCount).forEach(k => weeklyCount[k] = 0);
 
-    function getAvailable(arr, day, time, limitOnce = true) {
-      return arr.filter(name => {
-        if (limitOnce && dailyAssignments[day]?.includes(name)) return false;
-        if (time !== "5:30am" && only530.includes(name)) return false;
-        if (day === "Friday" && time === "10am" && fr10Exclusions.includes(name)) return false;
-        return true;
-      });
-    }
+  for (let day of days) {
+    output.push(`\n${day}`);
+    dayAssignment[day] = {};
+    const todayUsed = new Set();
 
-    function assignMass(day, time, assigned) {
-      dailyAssignments[day] = dailyAssignments[day] || [];
-      const isKeyMass = isKeyboardMass(day, time);
-      const [mCount, fCount] = getRandomRatio(day, time);
-      const availableMales = getAvailable(maleSingers, day, time);
-      const availableFemales = getAvailable(femaleSingers, day, time);
+    for (let time of massSchedule[day]) {
+      let singers = [], keyboard = null;
+      let ratio = "2m2f";
 
-      let males = shuffle(availableMales).slice(0, mCount);
-      let females = shuffle(availableFemales).slice(0, fCount);
+      if (time === "5:30am") ratio = "1m1f";
+      else if (day === "Friday" && ["7am", "5:30pm"].includes(time)) ratio = "2m2f";
+      else if (day === "Sunday" && time === "7am") ratio = "2m2f";
+      else ratio = Math.random() < 0.5 ? "1m2f" : "2m2f";
 
-      males.forEach(m => dailyAssignments[day].push(m));
-      females.forEach(f => dailyAssignments[day].push(f));
+      keyboard = assignKeyboard(day, time, todayUsed);
+      
+      const availableMales = maleSingers.filter(n => !todayUsed.has(n) && (!only530.includes(n) || time === "5:30am"));
+      const availableFemales = femaleSingers.filter(n => !todayUsed.has(n) && (!only530.includes(n) || time === "5:30am"));
 
-      let kb = null;
-      if (isKeyMass) {
-        const keyList = getAvailable([...keyboardists, ...hybridKeyboardists], day, time, false);
-        const preferred = shuffle(keyList.filter(k => keyboardists.includes(k)));
-        const hybrid = shuffle(keyList.filter(k => hybridKeyboardists.includes(k) && hybridWeeklyCount[k] < 1));
-        if (preferred.length > 0) {
-          kb = preferred[0];
-        } else if (hybrid.length > 0) {
-          kb = hybrid[0];
-          hybridWeeklyCount[kb]++;
-        }
-        if (kb) dailyAssignments[day].push(kb);
+      if (day === "Friday" && time === "10am") {
+        singers = pickMembers(day, time, ratio, new Set([...todayUsed, ...friday10amExceptions]));
+      } else {
+        singers = pickMembers(day, time, ratio, todayUsed);
       }
 
-      const people = [
-        `Time: ${time}`,
-        ` Keyboard: ${kb || "None"}`,
-        ` Males: ${males.join(", ")}`,
-        ` Females: ${females.join(", ")}`
-      ];
-      assigned.push(people.join("\n"));
-    }
+      singers.forEach(s => todayUsed.add(s));
+      singers.forEach(s => countMember(s));
 
-    function generateTimetable() {
-      const output = document.getElementById("output");
-      const log = document.getElementById("log");
-      let result = [];
-      dailyAssignments = {};
-      hybridWeeklyCount = { sebastian: 0, shaji: 0 };
-
-      for (const day of weekDays) {
-        result.push(day.toUpperCase());
-        const assigned = [];
-        for (const time of masses[day]) {
-          assignMass(day, time, assigned);
-        }
-        result.push(assigned.join("\n\n"));
-        result.push("\n");
+      if (keyboard && hybrid.includes(keyboard) && !singers.includes(keyboard)) {
+        singers.push(keyboard);
       }
 
-      const finalText = result.join("\n");
-      output.value = finalText;
-      const timestamp = new Date().toLocaleString();
-      assignmentLog.push(`Generated at ${timestamp}`);
-      log.innerHTML = assignmentLog.map(e => `<div class='log-entry'>${e}</div>`).join("");
+      const singerText = singers.join(", ");
+      const line = `${time} - Singers: ${singerText}${keyboard ? ` | Keyboard: ${keyboard}` : ""}`;
+      output.push(line);
     }
+  }
 
-    function copyOutput() {
-      const output = document.getElementById("output");
-      output.select();
-      document.execCommand("copy");
-      alert("Copied to clipboard!");
-    }
-  </script>
+  const outText = output.join("\n");
+  document.getElementById("output").textContent = outText;
+
+  const now = new Date();
+  const stamp = `${now.toLocaleDateString()} ${now.toLocaleTimeString()}`;
+  const logItem = document.createElement("li");
+  logItem.textContent = `Generated at ${stamp}`;
+  document.getElementById("log").appendChild(logItem);
+}
+
+function copyTimetable() {
+  const text = document.getElementById("output").textContent;
+  navigator.clipboard.writeText(text).then(() => alert("Timetable copied!"));
+}
+</script>
 </body>
 </html>
