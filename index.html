@@ -5,158 +5,152 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Choir Timetable Generator</title>
   <style>
-    body { font-family: Arial, sans-serif; padding: 20px; background-color: #f5f5f5; }
-    h1 { color: #2c3e50; }
-    button { margin: 10px 0; padding: 10px 20px; background-color: #2980b9; color: white; border: none; cursor: pointer; }
-    button:hover { background-color: #3498db; }
-    pre { background: #ecf0f1; padding: 10px; border-radius: 5px; white-space: pre-wrap; }
-    .log { margin-top: 20px; }
+    body { font-family: Arial, sans-serif; margin: 2rem; background: #f9f9f9; }
+    button { padding: 10px 20px; font-size: 16px; margin-top: 10px; }
+    pre { background: #fff; padding: 1rem; border: 1px solid #ccc; white-space: pre-wrap; }
+    .log-entry { margin-bottom: 0.5rem; font-size: 0.9rem; color: #555; }
   </style>
 </head>
 <body>
-  <h1>St. Mary’s Forane Church Choir Timetable Generator</h1>
+  <h1>St. Mary's Choir Timetable Generator</h1>
   <button onclick="generateTimetable()">Generate Timetable</button>
-  <button onclick="copyToClipboard()">Copy to Clipboard</button>
+  <button onclick="copyText()">Copy Output</button>
+  <h2>Weekly Timetable</h2>
   <pre id="output"></pre>
-  <div class="log">
-    <h3>Generation Log:</h3>
-    <ul id="log"></ul>
-  </div>
+  <h2>Generation Log</h2>
+  <div id="log"></div>
 
-<script>
-const massSchedule = {
-  Monday:    ["5:30am", "7am"],
-  Tuesday:   ["5:30am", "7am"],
-  Wednesday: ["5:30am", "7am"],
-  Thursday:  ["5:30am", "7am"],
-  Friday:    ["5:30am", "7am", "10am", "5:30pm"],
-  Saturday:  ["5:30am", "7am"],
-  Sunday:    ["5:30am", "7am", "10am", "5pm"]
-};
+  <script>
+    const maleSingers = ["seby", "sebastian", "roy", "phijo", "shaji", "robert", "don", "aibel", "atul"];
+    const femaleSingers = ["anu", "angel", "jemcy", "sini", "priya", "dona", "soyal", "jincy", "biji", "christy", "sneha"];
+    const keyboardists = ["abraham sn", "abraham jr", "davis", "sebastian", "shaji"];
+    const hybridKeyboardists = ["sebastian", "shaji"];
+    const prioritizedKeyboardists = ["davis", "abraham sn", "abraham jr"];
 
-const keyboardMasses = {
-  Friday: ["7am", "10am", "5:30pm"],
-  Saturday: ["7am"],
-  Sunday: ["7am", "10am", "5pm"]
-};
+    const unavailableFriday10am = ["atul", "aibel", "angel", "sneha", "soyal", "christy", "dona", "abraham jr", "abraham sn", "jemcy"];
+    const abrahamSnUnavailable = ["friday-10:00", "friday-17:30"];
+    const morningOnly = ["seby", "jincy", "biji"];
 
-const maleSingers = ["seby", "sebastian", "roy", "phijo", "shaji", "robert", "don", "aibel", "atul"];
-const femaleSingers = ["anu", "angel", "jemcy", "sini", "priya", "dona", "soyal", "jincy", "biji", "christy", "sneha"];
+    const days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+    const massSchedule = {
+      monday:    ["5:30", "7:00"],
+      tuesday:   ["5:30", "7:00"],
+      wednesday: ["5:30", "7:00"],
+      thursday:  ["5:30", "7:00"],
+      friday:    ["5:30", "7:00", "10:00", "17:30"],
+      saturday:  ["5:30", "7:00"],
+      sunday:    ["5:30", "7:00", "10:00", "17:00"]
+    };
 
-const keyboardists = ["abraham sn", "abraham jr", "davis"];
-const hybrids = ["sebastian", "shaji"];
+    const keyboardMasses = {
+      friday: ["7:00", "10:00", "17:30"],
+      saturday: ["7:00"],
+      sunday: ["7:00", "10:00", "17:00"]
+    };
 
-const allSingers = [...maleSingers, ...femaleSingers];
-const restricted10amFriday = ["atul", "aibel", "angel", "sneha", "soyal", "christy", "dona", "abraham jr", "abraham sn", "jemcy"];
+    const hybridLimit = { sebastian: 0, shaji: 0 };
 
-let assignmentHistory = {};
-let hybridWeeklyUse = {"sebastian": 0, "shaji": 0};
-
-function shuffle(arr) {
-  let a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-
-function chooseSingers(day, time) {
-  let males = shuffle(maleSingers);
-  let females = shuffle(femaleSingers);
-  
-  // Bias: 50-60% chance for seby, jincy, biji in 5:30am
-  if (time === "5:30am") {
-    if (Math.random() < 0.6 && males.includes("seby")) {
-      males = ["seby", ...males.filter(m => m !== "seby")];
+    function shuffle(array) {
+      for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+      }
     }
-    if (Math.random() < 0.6 && females.includes("jincy")) {
-      females = ["jincy", ...females.filter(f => f !== "jincy")];
-    }
-    if (Math.random() < 0.6 && females.includes("biji")) {
-      females = ["biji", ...females.filter(f => f !== "biji")];
-    }
-  }
 
-  let ratio;
-  if (time === "5:30am") {
-    ratio = { m: 1, f: 1 };
-  } else {
-    ratio = { m: 2, f: 2 }; // default to max ratio
-  }
+    function chooseSingers(time, day) {
+      let males = [...maleSingers];
+      let females = [...femaleSingers];
 
-  const male = males.slice(0, ratio.m);
-  const female = females.slice(0, ratio.f);
-  return [...male, ...female];
-}
+      shuffle(males);
+      shuffle(females);
 
-function chooseKeyboardist(day, time) {
-  if (!keyboardMasses[day] || !keyboardMasses[day].includes(time)) return null;
+      let ratio;
+      if (time === "5:30") {
+        // Increase chance for morningOnly members
+        const poolM = males.filter(m => morningOnly.includes(m));
+        const poolF = females.filter(f => morningOnly.includes(f));
+        const rand = Math.random();
 
-  const preferred = shuffle(["abraham sn", "abraham jr", "davis"]);
-  for (let p of preferred) {
-    if (!Object.values(assignmentHistory).flat().includes(p)) return p;
-  }
-
-  const eligibleHybrids = hybrids.filter(h => hybridWeeklyUse[h] < 1);
-  for (let h of shuffle(eligibleHybrids)) {
-    hybridWeeklyUse[h]++;
-    return h;
-  }
-
-  return null;
-}
-
-function assignMass(day, time) {
-  const singers = chooseSingers(day, time);
-  const keyboard = chooseKeyboardist(day, time);
-
-  let result = `${time} - Singers: ${singers.join(", ")}`;
-  if (keyboard) {
-    if (!singers.includes(keyboard)) result += ` | Keyboard: ${keyboard}`;
-    else result += ` | Keyboard/Singer: ${keyboard}`;
-  }
-  return result;
-}
-
-function generateTimetable() {
-  assignmentHistory = {};
-  hybridWeeklyUse = {"sebastian": 0, "shaji": 0};
-  let output = "";
-  for (let day of Object.keys(massSchedule)) {
-    output += `\n${day.toUpperCase()}:\n`;
-    assignmentHistory[day] = [];
-    for (let time of massSchedule[day]) {
-      // Skip 2m1f (invalid)
-      const singers = chooseSingers(day, time);
-      if (singers.filter(m => maleSingers.includes(m)).length === 2 && singers.filter(f => femaleSingers.includes(f)).length === 1) continue;
-
-      // Enforce 2m2f for Fri/Sun 7am
-      if ((day === "Friday" && time === "7am") || (day === "Sunday" && time === "7am")) {
-        if (singers.filter(m => maleSingers.includes(m)).length !== 2 || singers.filter(f => femaleSingers.includes(f)).length !== 2) continue;
+        if (rand < 0.6 && poolM.length > 0 && poolF.length > 0) {
+          return [poolM[0], poolF[0]];
+        }
+        ratio = [1, 1];
+      } else if ((day === "friday" && time === "7:00") || (day === "sunday" && time === "7:00")) {
+        ratio = [2, 2];
+      } else {
+        ratio = [[1, 1], [1, 2], [2, 2]][Math.floor(Math.random() * 3)];
       }
 
-      // Skip restricted for Fri 10am
-      if (day === "Friday" && time === "10am" && singers.some(s => restricted10amFriday.includes(s))) continue;
-
-      const line = assignMass(day, time);
-      assignmentHistory[day].push(line);
-      output += line + "\n";
+      const selectedM = males.slice(0, ratio[0]);
+      const selectedF = females.slice(0, ratio[1]);
+      return [...selectedM, ...selectedF];
     }
-  }
 
-  document.getElementById("output").textContent = output;
-  const now = new Date();
-  const logEntry = document.createElement("li");
-  logEntry.textContent = `Generated at ${now.toLocaleString()}`;
-  document.getElementById("log").prepend(logEntry);
-}
+    function chooseKeyboardist(day, time) {
+      const available = keyboardists.filter(k => !(k === "abraham sn" && abrahamSnUnavailable.includes(`${day}-${time}`)));
+      const priority = prioritizedKeyboardists.filter(k => available.includes(k));
 
-function copyToClipboard() {
-  const text = document.getElementById("output").textContent;
-  navigator.clipboard.writeText(text).then(() => alert("Copied to clipboard!"));
-}
-</script>
+      if (priority.length > 0) return priority[Math.floor(Math.random() * priority.length)];
 
+      const hybrids = hybridKeyboardists.filter(h => hybridLimit[h] < 1 && available.includes(h));
+      if (hybrids.length > 0) {
+        const chosen = hybrids[Math.floor(Math.random() * hybrids.length)];
+        hybridLimit[chosen]++;
+        return chosen;
+      }
+
+      return available[Math.floor(Math.random() * available.length)] || "";
+    }
+
+    function generateTimetable() {
+      hybridLimit.sebastian = 0;
+      hybridLimit.shaji = 0;
+
+      const timetable = [];
+
+      for (const day of days) {
+        timetable.push(day.toUpperCase());
+        for (const time of massSchedule[day]) {
+          const massId = `${day}-${time}`;
+
+          // Apply exception filter for Friday 10AM
+          let singers = chooseSingers(time, day);
+          if (day === "friday" && time === "10:00") {
+            singers = singers.filter(p => !unavailableFriday10am.includes(p));
+          }
+
+          let keyboard = "";
+          if (keyboardMasses[day]?.includes(time)) {
+            keyboard = chooseKeyboardist(day, time);
+
+            // if hybrid and not already in singers, optionally add to singers
+            if (hybridKeyboardists.includes(keyboard) && !singers.includes(keyboard) && Math.random() < 0.5) {
+              singers.push(keyboard);
+            }
+          }
+
+          timetable.push(`${time} - Singers: ${singers.join(", ")} | Keyboard: ${keyboard}`);
+        }
+        timetable.push("\n");
+      }
+
+      const out = timetable.join("\n");
+      document.getElementById("output").innerText = out;
+      logGeneration();
+    }
+
+    function copyText() {
+      const text = document.getElementById("output").innerText;
+      navigator.clipboard.writeText(text).then(() => alert("Timetable copied!"));
+    }
+
+    function logGeneration() {
+      const log = document.getElementById("log");
+      const entry = document.createElement("div");
+      entry.className = "log-entry";
+      entry.textContent = `Generated on: ${new Date().toLocaleString()}`;
+      log.prepend(entry);
+    }
+  </script>
 </body>
 </html>
