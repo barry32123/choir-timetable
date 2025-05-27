@@ -8,7 +8,7 @@
   body { font-family: Arial, sans-serif; margin: 20px; background: #f7f7f7; }
   button { margin: 10px 5px; padding: 10px 20px; font-size: 16px; cursor: pointer; }
   pre { background: white; padding: 1rem; border: 1px solid #ccc; white-space: pre-wrap; max-height: 500px; overflow-y: auto; }
-  #log { margin-top: 20px; font-size: 0.9rem; color: #555; max-height: 200px; overflow-y: auto; border-top: 1px solid #ccc; padding-top: 10px; }
+  #log { margin-top: 20px; font-size: 0.9rem; color: #555; max-height: 250px; overflow-y: auto; border-top: 1px solid #ccc; padding-top: 10px; }
   .log-entry { margin-bottom: 5px; }
 </style>
 </head>
@@ -32,7 +32,8 @@ const hybridKeyboardists = ["sebastian", "shaji"];
 const prioritizedKeyboardists = ["davis", "abraham sn", "abraham jr"];
 
 const unavailableFriday10am = ["atul", "aibel", "angel", "sneha", "soyal", "christy", "dona", "abraham jr", "abraham sn", "jemcy"];
-const abrahamSnUnavailableFriday = ["10:00", "5:30"];
+const abrahamSnUnavailableFridayTimes = ["10:00", "5:30"];
+
 const morningOnlyMembers = ["seby", "jincy", "biji"];
 
 const days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
@@ -51,166 +52,211 @@ const keyboardMasses = {
   sunday: ["7:00", "10:00", "17:00"]
 };
 
-// Track assignments per member per day to ensure no double booking
-let dailyAssignments = {};
-// Track hybrid keyboardist usage per week to limit to max 1 keyboard + singer mass/week
-let hybridKeyboardUsage = { sebastian: 0, shaji: 0 };
+// Allowed singing ratios
+// Monday-Thursday 7:00 => only [1M1F, 1M2F]
+// Friday-Sunday any ratio but:
+  // Friday 7:00, Friday 17:30, Sunday 7:00 => prefer 2M2F
+const allowedRatiosWeekday7am = [[1,1],[1,2]];
+const allowedRatiosWeekend = [[1,1],[1,2],[2,2]];
 
+// Utility shuffle
 function shuffle(arr) {
-  for (let i = arr.length - 1; i > 0; i--) {
-    let j = Math.floor(Math.random() * (i + 1));
+  for (let i = arr.length -1; i > 0; i--) {
+    let j = Math.floor(Math.random()*(i+1));
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
 }
 
+// Tracking assignments
+// Map day->set of assigned members (keyboard+singing) to prevent double booking
+let dailyAssignments = {};
+// Hybrid keyboard usage count per week (max 1 per member)
+let hybridKeyboardUsage = { sebastian: 0, shaji: 0 };
+// Count 5:30 assignments for morning-only members for 50-60% presence
+let morningMassCount = 0;
+let morningMassMorningOnlyCount = 0;
+
+// Helper to check if member can be assigned on day
 function canAssign(member, day) {
   if (!dailyAssignments[day]) dailyAssignments[day] = new Set();
   return !dailyAssignments[day].has(member);
 }
 
+// Mark member assigned
 function assignMember(member, day) {
   if (!dailyAssignments[day]) dailyAssignments[day] = new Set();
   dailyAssignments[day].add(member);
 }
 
+// Filter out Friday 10AM unavailable members
+function filterFriday10Unavailable(members) {
+  return members.filter(m => !unavailableFriday10am.includes(m));
+}
+
+// Select keyboardist obeying availability & max 1 hybrid keyboard + singer per week
 function selectKeyboardist(day, time) {
-  // Filter out abraham sn on Friday 10:00 and 5:30
   let available = keyboardists.filter(k => {
-    if (k === "abraham sn" && day === "friday" && abrahamSnUnavailableFriday.includes(time)) return false;
+    if (k === "abraham sn" && day === "friday" && abrahamSnUnavailableFridayTimes.includes(time)) return false;
     return canAssign(k, day);
   });
 
-  // Prioritize prioritizedKeyboardists
-  let prioritizedAvailable = prioritizedKeyboardists.filter(k => available.includes(k));
-  if (prioritizedAvailable.length) {
-    let choice = prioritizedAvailable[Math.floor(Math.random() * prioritizedAvailable.length)];
+  // Prioritize non-hybrid keyboardists first
+  let nonHybrid = available.filter(k => !hybridKeyboardists.includes(k));
+  if (nonHybrid.length) {
+    shuffle(nonHybrid);
+    let choice = nonHybrid[0];
     assignMember(choice, day);
-    if (hybridKeyboardists.includes(choice)) hybridKeyboardUsage[choice]++;
     return choice;
   }
 
-  // Then hybrids if their usage < 1 per week
-  let hybridsAvailable = hybridKeyboardists.filter(k => available.includes(k) && hybridKeyboardUsage[k] < 1);
-  if (hybridsAvailable.length) {
-    let choice = hybridsAvailable[Math.floor(Math.random() * hybridsAvailable.length)];
+  // Then hybrids if usage < 1
+  let hybrids = available.filter(k => hybridKeyboardists.includes(k) && hybridKeyboardUsage[k] < 1);
+  if (hybrids.length) {
+    shuffle(hybrids);
+    let choice = hybrids[0];
     assignMember(choice, day);
     hybridKeyboardUsage[choice]++;
-    return choice;
-  }
-
-  // Else any available keyboardist
-  if (available.length) {
-    let choice = available[Math.floor(Math.random() * available.length)];
-    assignMember(choice, day);
-    if (hybridKeyboardists.includes(choice)) hybridKeyboardUsage[choice]++;
     return choice;
   }
   return "";
 }
 
-// Ratio options for singing: only 1M1F, 1M2F, 2M2F (never 2M1F)
-const allowedRatios = [[1,1],[1,2],[2,2]];
-
-// For Friday 7:00 and Sunday 7:00, ratio forced 2M2F
+// Get ratio based on rules
 function getRatio(day, time) {
-  if ((day === "friday" && time === "7:00") || (day === "sunday" && time === "7:00")) return [2,2];
-  // Else random allowed ratio except no 2m1f
-  return allowedRatios[Math.floor(Math.random() * allowedRatios.length)];
+  // Strict Friday 7am, Friday 5:30pm, Sunday 7am => 2M2F preferred
+  if (
+    (day === "friday" && (time === "7:00" || time === "17:30")) ||
+    (day === "sunday" && time === "7:00")
+  ) return [2, 2];
+
+  // Monday-Thursday 7:00 AM
+  if (["monday","tuesday","wednesday","thursday"].includes(day) && time === "7:00") {
+    // pick randomly from allowed 1M1F or 1M2F
+    return allowedRatiosWeekday7am[Math.floor(Math.random() * allowedRatiosWeekday7am.length)];
+  }
+
+  // Otherwise weekend or other times allowed ratios
+  return allowedRatiosWeekend[Math.floor(Math.random() * allowedRatiosWeekend.length)];
 }
 
-function filterUnavailableFriday10am(members) {
-  return members.filter(m => !unavailableFriday10am.includes(m));
-}
-
+// Select singers with ratio, applying constraints & rotation
 function selectSingers(day, time) {
-  // Start with fresh copies to shuffle and pick fairly
+  // Copy male and female singers, filter daily assignments
   let males = maleSingers.filter(m => canAssign(m, day));
   let females = femaleSingers.filter(f => canAssign(f, day));
+
+  // Apply Friday 10 AM unavailability filter
+  if (day === "friday" && time === "10:00") {
+    males = filterFriday10Unavailable(males);
+    females = filterFriday10Unavailable(females);
+  }
+
+  // Shuffle for fair random
   shuffle(males);
   shuffle(females);
 
-  // Apply Friday 10AM unavailability for certain members
-  if (day === "friday" && time === "10:00") {
-    males = filterUnavailableFriday10am(males);
-    females = filterUnavailableFriday10am(females);
-  }
-
-  // 5:30 AM special handling for morningOnlyMembers and 50-60% chance for them
+  // Handle 5:30 AM special case for morningOnly members (~50-60% chance)
   if (time === "5:30") {
-    let mMorning = males.filter(m => morningOnlyMembers.includes(m));
-    let fMorning = females.filter(f => morningOnlyMembers.includes(f));
+    morningMassCount++;
+    // Separate morning-only and others
+    let mMorningOnly = males.filter(m => morningOnlyMembers.includes(m));
+    let fMorningOnly = females.filter(f => morningOnlyMembers.includes(f));
     let mOthers = males.filter(m => !morningOnlyMembers.includes(m));
     let fOthers = females.filter(f => !morningOnlyMembers.includes(f));
 
-    let chosenM = null;
-    let chosenF = null;
-    if (Math.random() < 0.55 && mMorning.length > 0) {
-      chosenM = mMorning.shift();
-    } else if (mOthers.length > 0) {
-      chosenM = mOthers.shift();
+    // Calculate current presence ratio for morning-only
+    let morningOnlyRatio = morningMassMorningOnlyCount / morningMassCount;
+
+    let selectedM = null;
+    let selectedF = null;
+
+    // For male, pick morningOnly if ratio < 0.6 else others if available
+    if (mMorningOnly.length && morningOnlyRatio < 0.6) {
+      selectedM = mMorningOnly[0];
+      morningMassMorningOnlyCount++;
+    } else if (mOthers.length) {
+      selectedM = mOthers[0];
+    } else if (mMorningOnly.length) {
+      selectedM = mMorningOnly[0];
+      morningMassMorningOnlyCount++;
     }
-    if (Math.random() < 0.55 && fMorning.length > 0) {
-      chosenF = fMorning.shift();
-    } else if (fOthers.length > 0) {
-      chosenF = fOthers.shift();
+
+    // For female similarly
+    if (fMorningOnly.length && morningOnlyRatio < 0.6) {
+      selectedF = fMorningOnly[0];
+      morningMassMorningOnlyCount++;
+    } else if (fOthers.length) {
+      selectedF = fOthers[0];
+    } else if (fMorningOnly.length) {
+      selectedF = fMorningOnly[0];
+      morningMassMorningOnlyCount++;
     }
-    if (chosenM && chosenF) {
-      assignMember(chosenM, day);
-      assignMember(chosenF, day);
-      return [chosenM, chosenF];
+
+    let result = [];
+    if (selectedM && canAssign(selectedM, day)) {
+      assignMember(selectedM, day);
+      result.push(selectedM);
     }
-    // fallback if not enough in morningOnly
+    if (selectedF && canAssign(selectedF, day)) {
+      assignMember(selectedF, day);
+      result.push(selectedF);
+    }
+    return result;
   }
 
-  // For other times, pick according to ratio
-  let [numM, numF] = getRatio(day, time);
+  // For other times: get ratio and pick accordingly
+  const [mCount, fCount] = getRatio(day, time);
 
-  let selectedM = [];
-  let selectedF = [];
+  // Special case: No 2M1F ratio allowed ever
+  // So if ratio is 1M1F or 1M2F or 2M2F only allowed.
 
-  for (let i=0; i<numM; i++) {
-    if (males.length === 0) break;
-    let m = males.shift();
-    selectedM.push(m);
+  // If not enough singers, adjust down
+  const finalMCount = Math.min(mCount, males.length);
+  const finalFCount = Math.min(fCount, females.length);
+
+  const selectedMales = males.slice(0, finalMCount);
+  const selectedFemales = females.slice(0, finalFCount);
+
+  const selected = [];
+
+  for (const m of selectedMales) {
     assignMember(m, day);
+    selected.push(m);
   }
-  for (let i=0; i<numF; i++) {
-    if (females.length === 0) break;
-    let f = females.shift();
-    selectedF.push(f);
+  for (const f of selectedFemales) {
     assignMember(f, day);
+    selected.push(f);
   }
 
-  return [...selectedM, ...selectedF];
+  return selected;
 }
 
+// Generate the timetable
 function generateTimetable() {
   dailyAssignments = {};
   hybridKeyboardUsage = { sebastian: 0, shaji: 0 };
+  morningMassCount = 0;
+  morningMassMorningOnlyCount = 0;
 
   let output = "";
+  let generatedAssignments = [];
+
   for (const day of days) {
-    output += day.toUpperCase() + "\n";
     for (const time of massSchedule[day]) {
-      output += `  ${time} Mass:\n`;
-
-      // Keyboard required?
-      const needsKeyboard = keyboardMasses[day] && keyboardMasses[day].includes(time);
-
       let keyboardist = "";
       let keyboardistAlsoSings = false;
+      const needsKeyboard = keyboardMasses[day] && keyboardMasses[day].includes(time);
 
       if (needsKeyboard) {
         keyboardist = selectKeyboardist(day, time);
       }
 
-      // Assign singers, exclude keyboardists who are also singers from being assigned again as singers if keyboardist already assigned this time
       let singers = [];
-      if (needsKeyboard && hybridKeyboardists.includes(keyboardist)) {
-        // Hybrid can sing+keyboard but max once per week
-        if (hybridKeyboardUsage[keyboardist] <= 1) {
+      if (keyboardist && hybridKeyboardists.includes(keyboardist)) {
+        // Hybrid keyboardist can also sing once per week max
+        if (hybridKeyboardUsage[keyboardist] <= 1 && canAssign(keyboardist, day)) {
           singers = selectSingers(day, time);
-          if (!singers.includes(keyboardist) && canAssign(keyboardist, day)) {
+          if (!singers.includes(keyboardist)) {
             singers.push(keyboardist);
             assignMember(keyboardist, day);
             keyboardistAlsoSings = true;
@@ -222,26 +268,53 @@ function generateTimetable() {
         singers = selectSingers(day, time);
       }
 
-      // Output keyboardist
-      if (keyboardist) {
-        output += `    Keyboard: ${keyboardist}\n`;
+      // Add keyboardist assignment if keyboardist assigned but not also singing
+      if (keyboardist && !keyboardistAlsoSings) {
+        assignMember(keyboardist, day);
       }
-      // Output singers
-      output += `    Singers (${singers.length}): ${singers.join(", ")}\n\n`;
+
+      // Compose output
+      output += `${day.toUpperCase()} ${time} Mass\n`;
+      if (keyboardist) output += `  Keyboard: ${keyboardist}\n`;
+      output += `  Singers (${singers.length}): ${singers.join(", ")}\n\n`;
+
+      // Save assignments for log, sorting later
+      generatedAssignments.push({
+        day, time,
+        keyboardist,
+        singers
+      });
     }
+  }
+
+  // Sort log by day order and time ascending
+  const dayOrder = { monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6, sunday: 7 };
+  generatedAssignments.sort((a,b) => {
+    if(dayOrder[a.day] !== dayOrder[b.day]) return dayOrder[a.day] - dayOrder[b.day];
+    // Time like "5:30", "7:00" sort numerically
+    return parseFloat(a.time.replace(":", ".")) - parseFloat(b.time.replace(":", "."));
+  });
+
+  // Create sorted log string
+  let logOutput = "=== Sorted Timetable Log ===\n";
+  for (const assign of generatedAssignments) {
+    logOutput += `${assign.day.toUpperCase()} ${assign.time} Mass\n`;
+    if (assign.keyboardist) logOutput += `  Keyboard: ${assign.keyboardist}\n`;
+    logOutput += `  Singers (${assign.singers.length}): ${assign.singers.join(", ")}\n\n`;
   }
 
   document.getElementById("output").textContent = output;
 
-  // Log generation
+  // Append log entry
   const logDiv = document.getElementById("log");
   const now = new Date().toLocaleString();
   const newLogEntry = document.createElement("div");
   newLogEntry.className = "log-entry";
-  newLogEntry.textContent = `${now} - Timetable generated.`;
+  newLogEntry.textContent = `${now}\n${logOutput}`;
   logDiv.prepend(newLogEntry);
 }
 
+// Copy to clipboard
 function copyOutput() {
   const text = document.getElementById("output").textContent;
   navigator.clipboard.writeText(text).then(() => {
