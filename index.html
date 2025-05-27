@@ -1,356 +1,145 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>St. Mary’s Forane Church Choir Timetable Generator</title>
-<style>
-  body { font-family: Arial, sans-serif; max-width: 900px; margin: auto; padding: 20px; background: #f8f9fa; }
-  h1 { text-align: center; color: #2c3e50; }
-  button { margin: 10px 5px 20px 0; padding: 10px 15px; font-size: 16px; cursor: pointer; }
-  button:disabled { background: #ccc; cursor: default; }
-  #output, #log { white-space: pre-wrap; background: #fff; border: 1px solid #ccc; padding: 15px; height: 250px; overflow-y: auto; font-family: monospace; }
-  #log { margin-top: 30px; font-size: 14px; color: #555; }
-  label { font-weight: bold; }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Choir Timetable Generator</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; background: #f9f9f9; }
+    textarea { width: 100%; height: 300px; margin-top: 10px; }
+    button { padding: 10px 15px; margin: 10px 0; }
+    .log-entry { font-size: 0.9em; color: #555; border-top: 1px solid #ccc; padding: 5px 0; }
+  </style>
 </head>
 <body>
+  <h1>St. Mary's Choir Timetable Generator</h1>
+  <button onclick="generateTimetable()">Generate Timetable</button>
+  <button onclick="copyOutput()">Copy Output</button>
+  <textarea id="output" readonly></textarea>
+  <h2>Generation Log</h2>
+  <div id="log"></div>
 
-<h1>St. Mary’s Forane Church Choir Timetable Generator</h1>
+  <script>
+    const maleSingers = ["seby", "sebastian", "roy", "phijo", "shaji", "robert", "don", "aibel", "atul"];
+    const femaleSingers = ["anu", "angel", "jemcy", "sini", "priya", "dona", "soyal", "jincy", "biji", "christy", "sneha"];
+    const keyboardists = ["abraham sn", "abraham jr", "davis"];
+    const hybridKeyboardists = ["sebastian", "shaji"];
+    const allKeyboardists = [...keyboardists, ...hybridKeyboardists];
 
-<button id="generateBtn">Generate Timetable</button>
-<button id="copyBtn" disabled>Copy Timetable</button>
+    const weekDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
-<div>
-  <label>Generated Timetable:</label>
-  <pre id="output">(Click Generate to create timetable)</pre>
-</div>
+    const masses = {
+      Monday: ["5:30am", "7am"],
+      Tuesday: ["5:30am", "7am"],
+      Wednesday: ["5:30am", "7am"],
+      Thursday: ["5:30am", "7am"],
+      Friday: ["5:30am", "7am", "10am", "5:30pm"],
+      Saturday: ["5:30am", "7am"],
+      Sunday: ["5:30am", "7am", "10am", "5pm"]
+    };
 
-<div>
-  <label>Generation Log:</label>
-  <pre id="log">(No generations yet)</pre>
-</div>
+    const keyboardMasses = {
+      Friday: ["7am", "10am", "5:30pm"],
+      Saturday: ["7am"],
+      Sunday: ["7am", "10am", "5pm"]
+    };
 
-<script>
-// --- Choir Data ---
+    const fr10Exclusions = ["atul", "aibel", "angel", "sneha", "soyal", "christy", "dona", "abraham jr", "abraham sn", "jemcy"];
+    const only530 = ["seby", "jincy", "biji"];
 
-const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-const dayShort = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    let assignmentLog = [];
+    let hybridWeeklyCount = { sebastian: 0, shaji: 0 };
+    let dailyAssignments = {};
 
-// Mass times per day with keyboard requirement flag
-const massSchedule = {
-  Monday:    [{time:'5:30 AM', keyboard:false}, {time:'7:00 AM', keyboard:false}],
-  Tuesday:   [{time:'5:30 AM', keyboard:false}, {time:'7:00 AM', keyboard:false}],
-  Wednesday: [{time:'5:30 AM', keyboard:false}, {time:'7:00 AM', keyboard:false}],
-  Thursday:  [{time:'5:30 AM', keyboard:false}, {time:'7:00 AM', keyboard:false}],
-  Friday:    [{time:'5:30 AM', keyboard:false}, {time:'7:00 AM', keyboard:true}, {time:'10:00 AM', keyboard:true}, {time:'5:30 PM', keyboard:true}],
-  Saturday:  [{time:'5:30 AM', keyboard:false}, {time:'7:00 AM', keyboard:true}],
-  Sunday:    [{time:'5:30 AM', keyboard:false}, {time:'7:00 AM', keyboard:true}, {time:'10:00 AM', keyboard:true}, {time:'5:00 PM', keyboard:true}],
-};
-
-// Members
-
-const maleSingers = ['Seby', 'Sebastian', 'Roy', 'Phijo', 'Shaji', 'Robert', 'Don', 'Aibel', 'Atul'];
-const femaleSingers = ['Anu', 'Angel', 'Jemcy', 'Sini', 'Priya', 'Dona', 'Soyal', 'Jincy', 'Biji', 'Christy', 'Sneha'];
-const keyboardists = ['Abraham Sn', 'Abraham Jr', 'Davis', 'Sebastian', 'Shaji']; // Sebastian & Shaji hybrids
-
-// Availability constraints
-const only530amMembers = new Set(['Seby', 'Jincy', 'Biji']);
-const unavailableFriday10am = new Set(['Atul', 'Aibel', 'Angel', 'Sneha', 'Soyal', 'Christy', 'Dona', 'Abraham Jr', 'Abraham Sn', 'Jemcy']);
-
-// Priority keyboardists
-const keyboardPriority = ['Davis', 'Abraham Sn', 'Abraham Jr'];
-const hybrids = ['Sebastian', 'Shaji'];
-
-// Allowed ratios for singers (male:female)
-const allowedRatios = [
-  {m:1, f:1},
-  {m:1, f:2},
-  {m:2, f:2}
-];
-
-// Helper functions
-
-// Shuffle array in-place (Fisher-Yates)
-function shuffle(array) {
-  for (let i = array.length -1; i >0; i--) {
-    const j = Math.floor(Math.random()*(i+1));
-    [array[i], array[j]] = [array[j], array[i]];
-  }
-}
-
-// Format current date/time for log
-function formatDateTime(d=new Date()) {
-  return d.toLocaleString();
-}
-
-// Scheduler class to keep state and assign members fairly
-class Scheduler {
-  constructor() {
-    // Clone member arrays for assignment tracking
-    this.males = maleSingers.map(name => ({name, assignedCount:0}));
-    this.females = femaleSingers.map(name => ({name, assignedCount:0}));
-    this.keyboardistsList = keyboardists.map(name => ({name, assignedCount:0, isHybrid: hybrids.includes(name)}));
-    this.hybridKeyboardCount = {'Sebastian':0, 'Shaji':0}; // max once/week for keyboard
-
-    // Track assignments per member per day to prevent double assignment
-    // { day: Set of member names assigned }
-    this.assignedPerDay = {};
-    days.forEach(day => this.assignedPerDay[day] = new Set());
-
-    // Weekly limits reset will be trivial here as we generate once per week
-  }
-
-  // Check if member can be assigned this day (no double mass)
-  canAssign(day, name) {
-    return !this.assignedPerDay[day].has(name);
-  }
-
-  // Mark assigned
-  assign(day, name) {
-    this.assignedPerDay[day].add(name);
-    // Increase count in males/females or keyboardists
-    let m = this.males.find(m => m.name === name);
-    if (m) { m.assignedCount++; return; }
-    let f = this.females.find(f => f.name === name);
-    if (f) { f.assignedCount++; return; }
-    let k = this.keyboardistsList.find(k => k.name === name);
-    if (k) {
-      k.assignedCount++;
-      if (k.isHybrid) this.hybridKeyboardCount[name]++;
+    function shuffle(arr) {
+      return arr.sort(() => Math.random() - 0.5);
     }
-  }
 
-  // Get available male singers who can be assigned on day and satisfy constraints
-  availableMales(day, massTime, keyboardRequired) {
-    return this.males.filter(m => this.canAssign(day, m.name))
-      .filter(m => {
-        // If keyboard mass and hybrid assigned keyboard max once/week, they can still sing if not assigned today
-        // But keyboard assignments handled separately
-        // For Seby/Jincy/Biji only 5:30am masses
-        if (only530amMembers.has(m.name) && massTime !== '5:30 AM') return false;
-        // Friday 10am constraints (male)
-        if (day === 'Friday' && massTime === '10:00 AM' && unavailableFriday10am.has(m.name)) return false;
+    function isKeyboardMass(day, time) {
+      return keyboardMasses[day]?.includes(time);
+    }
+
+    function getRandomRatio(day, time) {
+      if (time === "5:30am") return [1, 1];
+      const options = [[1, 1], [1, 2], [2, 2]];
+      return options[Math.floor(Math.random() * options.length)];
+    }
+
+    function getAvailable(arr, day, time, limitOnce = true) {
+      return arr.filter(name => {
+        if (limitOnce && dailyAssignments[day]?.includes(name)) return false;
+        if (time !== "5:30am" && only530.includes(name)) return false;
+        if (day === "Friday" && time === "10am" && fr10Exclusions.includes(name)) return false;
         return true;
       });
-  }
+    }
 
-  // Get available female singers similarly
-  availableFemales(day, massTime, keyboardRequired) {
-    return this.females.filter(f => this.canAssign(day, f.name))
-      .filter(f => {
-        if (only530amMembers.has(f.name) && massTime !== '5:30 AM') return false;
-        if (day === 'Friday' && massTime === '10:00 AM' && unavailableFriday10am.has(f.name)) return false;
-        return true;
-      });
-  }
+    function assignMass(day, time, assigned) {
+      dailyAssignments[day] = dailyAssignments[day] || [];
+      const isKeyMass = isKeyboardMass(day, time);
+      const [mCount, fCount] = getRandomRatio(day, time);
+      const availableMales = getAvailable(maleSingers, day, time);
+      const availableFemales = getAvailable(femaleSingers, day, time);
 
-  // Get available keyboardists for a mass (priority order)
-  availableKeyboardists(day, massTime) {
-    // Must not be assigned on day already
-    let available = this.keyboardistsList.filter(k => this.canAssign(day, k.name));
+      let males = shuffle(availableMales).slice(0, mCount);
+      let females = shuffle(availableFemales).slice(0, fCount);
 
-    // Exclude hybrids with more than once keyboard assignment per week
-    available = available.filter(k => {
-      if (k.isHybrid) return this.hybridKeyboardCount[k.name] < 1;
-      return true;
-    });
+      males.forEach(m => dailyAssignments[day].push(m));
+      females.forEach(f => dailyAssignments[day].push(f));
 
-    // Prioritize non-hybrid keyboardists with more assignments allowed (Davis, Abraham Sn, Abraham Jr)
-    // Sort keyboardists by priority and assignedCount ascending (less assigned first)
-    available.sort((a,b) => {
-      const aPrio = keyboardPriority.includes(a.name) ? 0 : 1;
-      const bPrio = keyboardPriority.includes(b.name) ? 0 : 1;
-      if (aPrio !== bPrio) return aPrio - bPrio;
-      return a.assignedCount - b.assignedCount;
-    });
-
-    return available;
-  }
-
-  // Assign keyboardist for a mass (one keyboardist only)
-  assignKeyboard(day, massTime) {
-    const avail = this.availableKeyboardists(day, massTime);
-    if (avail.length === 0) return null;
-    const chosen = avail[0];
-    this.assign(day, chosen.name);
-    return chosen.name;
-  }
-
-  // Assign singers for a mass given ratio (malesNeeded, femalesNeeded)
-  assignSingers(day, massTime, malesNeeded, femalesNeeded) {
-    // Get available singers satisfying constraints
-    const availMales = this.availableMales(day, massTime);
-    const availFemales = this.availableFemales(day, massTime);
-
-    if (availMales.length < malesNeeded || availFemales.length < femalesNeeded) return null;
-
-    // Sort by assignedCount ascending to keep fair distribution
-    availMales.sort((a,b) => a.assignedCount - b.assignedCount);
-    availFemales.sort((a,b) => a.assignedCount - b.assignedCount);
-
-    // Pick top malesNeeded and femalesNeeded
-    const assignedM = availMales.slice(0,malesNeeded).map(m => m.name);
-    const assignedF = availFemales.slice(0,femalesNeeded).map(f => f.name);
-
-    // Mark assignments
-    assignedM.forEach(m => this.assign(day, m));
-    assignedF.forEach(f => this.assign(day, f));
-
-    return {males: assignedM, females: assignedF};
-  }
-
-  // Main method: assign for all days and masses
-  generateTimetable() {
-    const timetable = {};
-    // Reset assignedPerDay and counts for fresh generation
-    days.forEach(day => this.assignedPerDay[day] = new Set());
-    this.males.forEach(m => m.assignedCount = 0);
-    this.females.forEach(f => f.assignedCount = 0);
-    this.keyboardistsList.forEach(k => k.assignedCount = 0);
-    this.hybridKeyboardCount['Sebastian'] = 0;
-    this.hybridKeyboardCount['Shaji'] = 0;
-
-    for (const day of days) {
-      timetable[day] = [];
-      const masses = massSchedule[day];
-      for (const mass of masses) {
-        const time = mass.time;
-        const keyboardReq = mass.keyboard;
-
-        // Decide number of males/females based on time and rules
-        let assignedKeyboard = null;
-        let assignedSingers = null;
-
-        if (keyboardReq) {
-          // Assign keyboardist
-          assignedKeyboard = this.assignKeyboard(day, time);
+      let kb = null;
+      if (isKeyMass) {
+        const keyList = getAvailable([...keyboardists, ...hybridKeyboardists], day, time, false);
+        const preferred = shuffle(keyList.filter(k => keyboardists.includes(k)));
+        const hybrid = shuffle(keyList.filter(k => hybridKeyboardists.includes(k) && hybridWeeklyCount[k] < 1));
+        if (preferred.length > 0) {
+          kb = preferred[0];
+        } else if (hybrid.length > 0) {
+          kb = hybrid[0];
+          hybridWeeklyCount[kb]++;
         }
-
-        // Assign singers:
-        // 5:30 AM mass => 1m 1f
-        // Other masses => ratios 1m1f, 1m2f or 2m2f
-
-        if (time === '5:30 AM') {
-          assignedSingers = this.assignSingers(day, time, 1, 1);
-          if (!assignedSingers) {
-            // fallback to any available 1m 1f ignoring counts (force)
-            assignedSingers = this.forceAssignSingers(day, time, 1,1);
-          }
-        } else {
-          // try allowed ratios in order until success
-          let success = false;
-          for (const ratio of allowedRatios) {
-            assignedSingers = this.assignSingers(day, time, ratio.m, ratio.f);
-            if (assignedSingers) {
-              success = true;
-              break;
-            }
-          }
-          if (!success) {
-            // fallback to smallest ratio forcibly if nothing else
-            assignedSingers = this.forceAssignSingers(day, time, 1,1);
-          }
-        }
-
-        // If hybrids assigned keyboard, allow them also to sing at same mass if not assigned yet today (max twice a week total)
-        if (assignedKeyboard && hybrids.includes(assignedKeyboard)) {
-          // Try to add that hybrid as singer too if possible
-          const hybridName = assignedKeyboard;
-          if (!this.assignedPerDay[day].has(hybridName)) {
-            // Check if hybrid can be added as male singer for this mass without breaking ratio
-            if (!assignedSingers.males.includes(hybridName)) {
-              assignedSingers.males.push(hybridName);
-              this.assign(day, hybridName);
-            }
-          }
-        }
-
-        timetable[day].push({
-          time,
-          keyboard: assignedKeyboard,
-          singers: assignedSingers,
-        });
+        if (kb) dailyAssignments[day].push(kb);
       }
+
+      const people = [
+        `Time: ${time}`,
+        ` Keyboard: ${kb || "None"}`,
+        ` Males: ${males.join(", ")}`,
+        ` Females: ${females.join(", ")}`
+      ];
+      assigned.push(people.join("\n"));
     }
 
-    return timetable;
-  }
+    function generateTimetable() {
+      const output = document.getElementById("output");
+      const log = document.getElementById("log");
+      let result = [];
+      dailyAssignments = {};
+      hybridWeeklyCount = { sebastian: 0, shaji: 0 };
 
-  // Force assign singers ignoring availability counts (to handle edge cases)
-  forceAssignSingers(day, time, malesNeeded, femalesNeeded) {
-    // Pick any available males/females ignoring assignedPerDay (risky but fallback)
-    const availMales = this.males.filter(m => !only530amMembers.has(m.name) || time === '5:30 AM').slice(0,malesNeeded).map(m => m.name);
-    const availFemales = this.females.filter(f => !only530amMembers.has(f.name) || time === '5:30 AM').slice(0,femalesNeeded).map(f => f.name);
+      for (const day of weekDays) {
+        result.push(day.toUpperCase());
+        const assigned = [];
+        for (const time of masses[day]) {
+          assignMass(day, time, assigned);
+        }
+        result.push(assigned.join("\n\n"));
+        result.push("\n");
+      }
 
-    // Assign them forcibly
-    availMales.forEach(m => this.assign(day,m));
-    availFemales.forEach(f => this.assign(day,f));
-
-    return {males: availMales, females: availFemales};
-  }
-}
-
-// Utility: format timetable to readable text
-function formatTimetable(timetable) {
-  let output = '';
-  for (const day of days) {
-    output += `${dayShort[days.indexOf(day)]}:\n`;
-    timetable[day].forEach(mass => {
-      output += `  ${mass.time}\n`;
-      if (mass.keyboard) output += `    Keyboard: ${mass.keyboard}\n`;
-      const males = mass.singers.males.join(', ');
-      const females = mass.singers.females.join(', ');
-      output += `    Male Singers: ${males}\n`;
-      output += `    Female Singers: ${females}\n`;
-    });
-    output += '\n';
-  }
-  return output.trim();
-}
-
-// --- Main ---
-
-const scheduler = new Scheduler();
-
-const generateBtn = document.getElementById('generateBtn');
-const copyBtn = document.getElementById('copyBtn');
-const outputEl = document.getElementById('output');
-const logEl = document.getElementById('log');
-
-function addToLog(text) {
-  const timestamp = formatDateTime();
-  const newEntry = `[${timestamp}]\n${text}\n\n` + (logEl.textContent.trim() === '(No generations yet)' ? '' : logEl.textContent);
-  logEl.textContent = newEntry;
-}
-
-generateBtn.onclick = () => {
-  generateBtn.disabled = true;
-  outputEl.textContent = 'Generating timetable...';
-  setTimeout(() => {
-    try {
-      const timetable = scheduler.generateTimetable();
-      const formatted = formatTimetable(timetable);
-      outputEl.textContent = formatted;
-      addToLog(formatted);
-      copyBtn.disabled = false;
-    } catch (e) {
-      outputEl.textContent = 'Error generating timetable: ' + e.message;
-      copyBtn.disabled = true;
-    } finally {
-      generateBtn.disabled = false;
+      const finalText = result.join("\n");
+      output.value = finalText;
+      const timestamp = new Date().toLocaleString();
+      assignmentLog.push(`Generated at ${timestamp}`);
+      log.innerHTML = assignmentLog.map(e => `<div class='log-entry'>${e}</div>`).join("");
     }
-  }, 100); // small delay to show generating
-};
 
-copyBtn.onclick = () => {
-  navigator.clipboard.writeText(outputEl.textContent).then(() => {
-    alert('Timetable copied to clipboard!');
-  }, () => {
-    alert('Failed to copy timetable.');
-  });
-};
-</script>
-
+    function copyOutput() {
+      const output = document.getElementById("output");
+      output.select();
+      document.execCommand("copy");
+      alert("Copied to clipboard!");
+    }
+  </script>
 </body>
 </html>
