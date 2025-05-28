@@ -116,10 +116,12 @@ function assignChoir(day, time) {
   const femalePool = getEligibleMembers(members.femaleSingers, day, time);
 
   let config = { males: 1, females: 2 };
+
   if ((day === "Friday" && ["7am", "5:30pm"].includes(time)) || (day === "Sunday" && time === "7am")) {
     config = Math.random() < 0.8 ? { males: 2, females: 2 } : { males: 1, females: 1 };
   } else if (time === "5:30am") {
-    config = Math.random() < 0.6 ? { males: 1, females: 1 } : { males: 1, females: 2 };
+    // Change here: 85% chance for 1m 1f, 15% chance for 1m 2f
+    config = Math.random() < 0.85 ? { males: 1, females: 1 } : { males: 1, females: 2 };
   }
 
   const selectedMales = pickRandomMembers(malePool, config.males, day);
@@ -143,6 +145,7 @@ function assignChoir(day, time) {
     keyboard: keyboardist ? keyboardist.name : "—"
   };
 }
+
 
 function generateTimetable() {
   assignmentLog.length = 0;
