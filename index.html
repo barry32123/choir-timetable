@@ -176,9 +176,9 @@ function ensureAbrahamSnSunday() {
     entry => entry.day === "Sunday" && massesWithKeyboard["Sunday"].includes(entry.time)
   );
 
-  let abrahamAssignedIndex = sundayMassesWithKeyboard.findIndex(entry => entry.keyboard === "abraham sn");
+  let AbrahamSnAssignedIndex = sundayMassesWithKeyboard.findIndex(entry => entry.keyboard === "abraham sn");
 
-  if (abrahamAssignedIndex === -1) {
+  if (AbrahamSnAssignedIndex === -1) {
     let maxUsage = -1;
     let indexToReplace = -1;
     sundayMassesWithKeyboard.forEach((entry, idx) => {
@@ -256,24 +256,25 @@ function ensureSebyEarlyMorning() {
     return acc + (curr.singers.includes("seby") ? 1 : 0);
   }, 0);
 
-  if (sebyAssignedCount === 0) {
-    for (const mass of earlyMasses) {
-      // Replace one male singer with Seby
-      const maleSingers = mass.singers.filter(s => members.maleSingers.some(m => m.name === s));
-      for (const male of maleSingers) {
-        if (male !== "seby") {
-          const index = mass.singers.indexOf(male);
-          if (index !== -1) {
-            mass.singers[index] = "seby";
-            usageCounter["seby"] = (usageCounter["seby"] || 0) + 1;
-            usageCounter[male] = Math.max(0, (usageCounter[male] || 1) - 1);
-            return;
-          }
-        }
+if (sebyAssignedCount === 0) {
+  for (const mass of earlyMasses) {
+    const index = assignmentLog.findIndex(e => e.day === mass.day && e.time === mass.time);
+    if (index !== -1) {
+      const maleSingers = members.maleSingers.filter(m => m.name !== "seby" && mass.singers.includes(m.name));
+      if (maleSingers.length > 0) {
+        const toReplace = maleSingers[0].name;
+        assignmentLog[index].singers = assignmentLog[index].singers.map(name =>
+          name === toReplace ? "seby" : name
+        );
+
+        usageCounter[toReplace] = Math.max(0, (usageCounter[toReplace] || 1) - 1);
+        usageCounter["seby"] = (usageCounter["seby"] || 0) + 1;
+        break;
       }
     }
   }
 }
+
 
 function ensureBijiJincyEarlyMorning() {
   // Biji and Jincy must get at least 2 early morning mass (5:30am) assignments each
@@ -313,14 +314,14 @@ function ensureBijiJincyEarlyMorning() {
 }
 
 function generateTimetable() {
+  assignmentLog.length = 0;
   usedToday = {};
   usageCounter = {};
-  assignmentLog.length = 0;
 
-  for (const [day, times] of Object.entries(weeklyMasses)) {
-    for (const time of times) {
-      const entry = assignChoir(day, time);
-      assignmentLog.push(entry);
+  for (const day in weeklyMasses) {
+    for (const time of weeklyMasses[day]) {
+      const assignment = assignChoir(day, time);
+      assignmentLog.push(assignment);
     }
   }
   // Reset
@@ -343,8 +344,7 @@ function generateTimetable() {
   ensureHybridKeyboardAssignment();
   ensureSebyEarlyMorning();
 
-  renderTimetable();
-  renderLog();
+  displayTimetable();
 }
   // Build timetable HTML after adjustments
   timetableHTML = assignmentLog.map(assign => 
@@ -358,6 +358,25 @@ function generateTimetable() {
   document.getElementById("timetable").innerHTML = timetableHTML;
 
   updateLogDisplay();
+}
+  function displayTimetable() {
+  const timetableDiv = document.getElementById("timetable");
+  timetableDiv.innerHTML = "";
+
+  for (const entry of assignmentLog) {
+    const div = document.createElement("div");
+    div.className = "mass-entry";
+    div.innerHTML = `<strong>${entry.day} ${entry.time}</strong><br>
+                     Singers: ${entry.singers.join(", ")}<br>
+                     Keyboard: ${entry.keyboard}`;
+    timetableDiv.appendChild(div);
+  }
+
+  // Log view
+  const logDisplay = document.getElementById("logDisplay");
+  logDisplay.textContent = assignmentLog.map(e =>
+    `${e.day} ${e.time} - [${e.singers.join(", ")}] | KB: ${e.keyboard}`
+  ).join("\n");
 }
   
 function renderTimetable() {
@@ -388,9 +407,10 @@ function updateLogDisplay() {
 }
 
 function copyTimetable() {
-  const text = assignmentLog.map(entry =>
-    `${entry.day} ${entry.time} - Singers: ${entry.singers.join(", ")}, Keyboard: ${entry.keyboard}`
+  const text = assignmentLog.map(e =>
+    `${e.day} ${e.time} - [${e.singers.join(", ")}] | KB: ${e.keyboard}`
   ).join("\n");
+
   navigator.clipboard.writeText(text).then(() => {
     alert("Timetable copied to clipboard!");
   });
