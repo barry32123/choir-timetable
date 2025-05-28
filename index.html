@@ -2,130 +2,203 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>St. Mary's Choir Timetable</title>
+  <title>Choir Timetable Generator - St. Mary's Forane Church</title>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      margin: 20px;
-      background-color: #f9f9f9;
-    }
-    h1, h2 {
-      color: #2c3e50;
-    }
-    button {
-      padding: 10px 15px;
-      margin: 5px;
-      background-color: #3498db;
-      color: white;
-      border: none;
-      border-radius: 5px;
-      cursor: pointer;
-    }
-    table, th, td {
-      border: 1px solid #ccc;
-      border-collapse: collapse;
-      padding: 8px;
-    }
-    table {
-      width: 100%;
-      background-color: #fff;
-      margin-bottom: 20px;
-    }
-    .log {
-      background-color: #ecf0f1;
-      padding: 10px;
-      border: 1px solid #bdc3c7;
-    }
-    textarea {
-      width: 100%;
-      height: 100px;
-      margin-top: 10px;
-    }
+    body { font-family: Arial, sans-serif; margin: 2rem; background: #f5f7fa; }
+    h1, h2 { text-align: center; }
+    button { margin: 10px; padding: 10px 20px; font-size: 16px; cursor: pointer; }
+    .mass-entry { background: #fff; border: 1px solid #ddd; padding: 10px; margin: 10px 0; border-radius: 8px; }
+    .log-box { background: #eef; padding: 10px; margin-top: 30px; border-radius: 8px; }
+    pre { white-space: pre-wrap; word-wrap: break-word; font-size: 14px; }
   </style>
 </head>
 <body>
-  <h1>St. Mary's Choir Timetable Generator</h1>
-  <button onclick="generateTimetable()">Generate Timetable</button>
-  <button onclick="copyTimetable()">Copy Timetable</button>
-  <button onclick="exportToPDF()">Export to PDF</button>
-  <button onclick="exportToExcel()">Export to Excel</button>
-  <button onclick="editAvailability()">Edit Member Availability</button>
 
-  <h2>Generated Timetable</h2>
-  <div id="timetable"></div>
+<h1>St. Mary's Choir Timetable Generator</h1>
+<div style="text-align:center;">
+  <button onclick="generateTimetable()">🎵 Generate Timetable</button>
+  <button onclick="copyTimetable()">📋 Copy Timetable</button>
+</div>
 
-  <h2>Log (View Only)</h2>
-  <div class="log" id="log">No timetable generated yet.</div>
+<h2>This Week's Timetable</h2>
+<div id="timetable"></div>
 
-  <h2>Member Availability</h2>
-  <textarea id="availabilityData"></textarea>
+<div class="log-box">
+  <h2>📖 Assignment Log (View-Only)</h2>
+  <pre id="logDisplay"></pre>
+</div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script>
-    // Placeholder data for demonstration
-    const members = {
-      male: ['seby', 'sebastian', 'roy', 'phijo', 'shaji', 'robert', 'don', 'aibel', 'ajone', 'atul'],
-      female: ['anu', 'angel', 'jemcy', 'sini', 'priya', 'dona', 'soyal', 'jincy', 'biji', 'christy', 'sneha'],
-      keyboardists: ['abraham sn', 'abraham jr', 'davis', 'sebastian', 'shaji']
-    };
+<script>
+// === Member Definitions ===
+const members = {
+  maleSingers: [
+    { name: "seby", earlyOnly: true },
+    { name: "sebastian" },
+    { name: "roy" },
+    { name: "phijo" },
+    { name: "shaji" },
+    { name: "robert" },
+    { name: "don" },
+    { name: "aibel", friday10amUnavailable: true },
+    { name: "ajone", friday10amUnavailable: true },
+    { name: "atul", friday10amUnavailable: true },
+  ],
+  femaleSingers: [
+    { name: "anu" },
+    { name: "angel", friday10amUnavailable: true },
+    { name: "jemcy", friday10amUnavailable: true },
+    { name: "sini" },
+    { name: "priya" },
+    { name: "dona", friday10amUnavailable: true },
+    { name: "soyal", friday10amUnavailable: true },
+    { name: "jincy", earlyOnly: true },
+    { name: "biji", earlyOnly: true },
+    { name: "christy", friday10amUnavailable: true },
+    { name: "sneha", friday10amUnavailable: true },
+  ],
+  keyboardists: [
+    { name: "abraham sn", friday10amUnavailable: true },
+    { name: "abraham jr", friday10amUnavailable: true },
+    { name: "davis" },
+    { name: "sebastian", hybrid: true },
+    { name: "shaji", hybrid: true },
+  ],
+};
 
-    let timetableData = {};
+const weeklyMasses = {
+  "Monday": ["5:30am", "7am"],
+  "Tuesday": ["5:30am", "7am"],
+  "Wednesday": ["5:30am", "7am"],
+  "Thursday": ["5:30am", "7am"],
+  "Friday": ["5:30am", "7am", "10am", "5:30pm"],
+  "Saturday": ["5:30am", "7am"],
+  "Sunday": ["5:30am", "7am", "10am", "5pm"],
+};
 
-    function generateTimetable() {
-      // Placeholder generation
-      const html = `
-        <table>
-          <tr><th>Day</th><th>Mass Time</th><th>Singers</th><th>Keyboardist</th></tr>
-          <tr><td>Monday</td><td>5:30am</td><td>seby, jincy</td><td>abraham jr</td></tr>
-        </table>`;
-      document.getElementById('timetable').innerHTML = html;
-      document.getElementById('log').innerText = 'Generated on: ' + new Date().toLocaleString();
-      timetableData = html;
-      localStorage.setItem('hybridRotation', JSON.stringify({ last: 'sebastian' }));
-    }
+const massesWithKeyboard = {
+  "Friday": ["7am", "10am", "5:30pm"],
+  "Saturday": ["7am"],
+  "Sunday": ["7am", "10am", "5pm"]
+};
 
-    function copyTimetable() {
-      const el = document.createElement('textarea');
-      el.value = document.getElementById('timetable').innerText;
-      document.body.appendChild(el);
-      el.select();
-      document.execCommand('copy');
-      document.body.removeChild(el);
-      alert('Timetable copied!');
-    }
+const usedToday = {};
+const usageCounter = {};
+const assignmentLog = [];
 
-    function exportToPDF() {
-      const {{ jsPDF }} = window.jspdf;
-      const doc = new jsPDF();
-      doc.text(document.getElementById('timetable').innerText, 10, 10);
-      doc.save('timetable.pdf');
-    }
+function isAvailable(member, day, time) {
+  if (member.earlyOnly && time !== "5:30am") return false;
+  if (member.friday10amUnavailable && day === "Friday" && time === "10am") return false;
+  return true;
+}
 
-    function exportToExcel() {
-      const table = document.querySelector('table');
-      const wb = XLSX.utils.table_to_book(table);
-      XLSX.writeFile(wb, 'timetable.xlsx');
-    }
+function getEligibleMembers(list, day, time) {
+  return list.filter(m => isAvailable(m, day, time));
+}
 
-    function editAvailability() {
-      const availability = prompt('Paste updated availability JSON:', localStorage.getItem('availabilityData') || '{}');
-      try {
-        const parsed = JSON.parse(availability);
-        localStorage.setItem('availabilityData', JSON.stringify(parsed));
-        document.getElementById('availabilityData').value = JSON.stringify(parsed, null, 2);
-        alert('Availability data updated!');
-      } catch (e) {
-        alert('Invalid JSON');
-      }
-    }
+function markUsed(member, day) {
+  if (!usedToday[day]) usedToday[day] = new Set();
+  usedToday[day].add(member.name);
+  usageCounter[member.name] = (usageCounter[member.name] || 0) + 1;
+}
 
-    // Load availability on page load
-    window.onload = () => {
-      const availability = localStorage.getItem('availabilityData') || '{}';
-      document.getElementById('availabilityData').value = availability;
-    };
-  </script>
+function hasBeenUsedToday(member, day) {
+  return usedToday[day] && usedToday[day].has(member.name);
+}
+
+function pickRandomMembers(candidates, count, day) {
+  const eligible = candidates.filter(m => !hasBeenUsedToday(m, day));
+  const shuffled = eligible.sort(() => 0.5 - Math.random());
+  return shuffled.slice(0, count);
+}
+
+function assignChoir(day, time) {
+  const malePool = getEligibleMembers(members.maleSingers, day, time);
+  const femalePool = getEligibleMembers(members.femaleSingers, day, time);
+
+  let config = { males: 1, females: 2 };
+  if ((day === "Friday" && ["7am", "5:30pm"].includes(time)) || (day === "Sunday" && time === "7am")) {
+    config = Math.random() < 0.8 ? { males: 2, females: 2 } : { males: 1, females: 1 };
+  } else if (time === "5:30am") {
+    config = Math.random() < 0.6 ? { males: 1, females: 1 } : { males: 1, females: 2 };
+  }
+
+  const selectedMales = pickRandomMembers(malePool, config.males, day);
+  const selectedFemales = pickRandomMembers(femalePool, config.females, day);
+  [...selectedMales, ...selectedFemales].forEach(m => markUsed(m, day));
+
+  let keyboardist = null;
+  if (massesWithKeyboard[day]?.includes(time)) {
+    const eligibleKeys = members.keyboardists.filter(k => 
+      isAvailable(k, day, time) && !hasBeenUsedToday(k, day)
+    );
+    keyboardist = eligibleKeys.sort((a, b) => 
+      (usageCounter[a.name] || 0) - (usageCounter[b.name] || 0)
+    )[0];
+    if (keyboardist) markUsed(keyboardist, day);
+  }
+
+  return {
+    day, time,
+    singers: [...selectedMales, ...selectedFemales].map(m => m.name),
+    keyboard: keyboardist ? keyboardist.name : "—"
+  };
+}
+
+function generateTimetable() {
+  assignmentLog.length = 0;
+  Object.keys(usedToday).forEach(k => delete usedToday[k]);
+
+  for (const name in usageCounter) usageCounter[name] = 0;
+
+  Object.keys(weeklyMasses).forEach(day => {
+    weeklyMasses[day].forEach(time => {
+      const result = assignChoir(day, time);
+      assignmentLog.push(result);
+    });
+  });
+
+  saveLog();
+  displayTimetable();
+}
+
+function displayTimetable() {
+  const container = document.getElementById("timetable");
+  container.innerHTML = "";
+
+  assignmentLog.forEach(entry => {
+    const div = document.createElement("div");
+    div.className = "mass-entry";
+    div.innerHTML = `<strong>${entry.day} - ${entry.time}</strong><br>
+      🎤 Singers: ${entry.singers.join(", ")}<br>
+      🎹 Keyboard: ${entry.keyboard}`;
+    container.appendChild(div);
+  });
+
+  updateLogDisplay();
+}
+
+function copyTimetable() {
+  const text = assignmentLog.map(entry =>
+    `${entry.day} ${entry.time}\nSingers: ${entry.singers.join(", ")}\nKeyboard: ${entry.keyboard}\n`
+  ).join("\n");
+  navigator.clipboard.writeText(text).then(() => alert("Timetable copied!"));
+}
+
+function saveLog() {
+  const logData = JSON.parse(localStorage.getItem("choirLogs") || "[]");
+  logData.push({ date: new Date().toLocaleString(), assignments: assignmentLog });
+  localStorage.setItem("choirLogs", JSON.stringify(logData));
+}
+
+function updateLogDisplay() {
+  const logs = JSON.parse(localStorage.getItem("choirLogs") || "[]");
+  const logText = logs.slice(-5).map(l => 
+    `🗓️ ${l.date}\n` + l.assignments.map(e => `- ${e.day} ${e.time}: ${e.singers.join(", ")} | Key: ${e.keyboard}`).join("\n")
+  ).join("\n\n");
+
+  document.getElementById("logDisplay").textContent = logText;
+}
+</script>
+
 </body>
 </html>
