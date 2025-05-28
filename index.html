@@ -5,141 +5,149 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Choir Timetable Generator</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 20px; background: #f0f4f8; }
-    h1 { text-align: center; }
-    table, th, td { border: 1px solid #ccc; border-collapse: collapse; padding: 8px; }
-    table { width: 100%; margin-top: 20px; background: #fff; }
-    th { background-color: #eee; }
-    button { margin-top: 20px; padding: 10px 20px; font-size: 16px; }
-    .log-section { margin-top: 40px; }
-    pre { background: #f7f7f7; padding: 10px; overflow-x: auto; }
+    body { font-family: Arial, sans-serif; padding: 1rem; }
+    button { margin: 0.5rem 0; }
+    pre { background: #f4f4f4; padding: 1rem; white-space: pre-wrap; word-wrap: break-word; }
+    textarea { width: 100%; height: 150px; margin-top: 10px; }
   </style>
 </head>
 <body>
   <h1>Choir Timetable Generator</h1>
   <button onclick="generateTimetable()">Generate Timetable</button>
-  <table id="timetable">
-    <thead>
-      <tr>
-        <th>Day</th>
-        <th>Time</th>
-        <th>Singers</th>
-        <th>Keyboardist</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
-  <div class="log-section">
-    <h2>Assignment Log</h2>
-    <pre id="assignmentLog"></pre>
-  </div>
+  <button onclick="copyTimetable()">Copy Timetable</button>
+  <button onclick="downloadCSV()">Download CSV</button>
+  <pre id="output"></pre>
+  <h2>Member Availability (JSON Format)</h2>
+  <textarea id="availabilityInput" placeholder="Paste availability JSON here or leave empty for default."></textarea>
+
   <script>
-    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    const times = ['5:30 AM', '10:00 AM', '5:30 PM'];
-
-    const choir = {
-      male: ['Seby', 'Sebastian', 'Roy', 'Phijo', 'Shaji', 'Robert', 'Don', 'Aibel', 'Atul'],
-      female: ['Anu', 'Angel', 'Jemcy', 'Sini', 'Priya', 'Dona', 'Soyal', 'Jincy', 'Biji', 'Christy', 'Sneha'],
-      keyboard: ['Abraham Jr.', 'Davis', 'Sebastian', 'Shaji'],
+    const singers = {
+      male: ["Seby", "Sebastian", "Roy", "Phijo", "Shaji", "Robert", "Don", "Aibel", "Atul"],
+      female: ["Anu", "Angel", "Jemcy", "Sini", "Priya", "Dona", "Soyal", "Jincy", "Biji", "Christy", "Sneha"]
     };
 
-    const hybridKeyboardists = ['Sebastian', 'Shaji'];
-    const hybridRotation = { Sebastian: 0, Shaji: 0 };
+    const keyboardists = ["Abraham Sn", "Abraham Jr.", "Davis", "Sebastian", "Shaji"];
+    const hybrid = ["Sebastian", "Shaji"];
 
-    const availability = {
-      'Abraham Sr.': { 'Friday': ['10:00 AM', '5:30 PM'] },
+    let history = JSON.parse(localStorage.getItem("choirHistory") || "{}");
+    let hybridHistory = JSON.parse(localStorage.getItem("hybridRotation") || "{}");
+
+    const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+    const masses = ["5:30 AM", "10:00 AM", "5:30 PM"];
+
+    const fixedAssignments = {
+      "Friday": {
+        "10:00 AM": { exclude: ["Abraham Sn"] },
+        "5:30 PM": { exclude: ["Abraham Sn"] }
+      }
     };
 
-    const morningSpecials = ['Seby', 'Jincy', 'Biji'];
-    const specialMorningCount = { 'Seby': 0, 'Jincy': 0, 'Biji': 0 };
+    const earlyMassQuota = {
+      "Seby": 0, "Jincy": 0, "Biji": 0
+    };
 
-    const assignments = [];
-    const memberAssignments = {};
-
-    function shuffle(arr) {
-      return arr.sort(() => Math.random() - 0.5);
+    function shuffle(array) {
+      let a = [...array];
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
     }
 
-    function getValidSingerCombination(males, females) {
-      const combinations = [];
-      if (males.length >= 1 && females.length >= 1) combinations.push([1, 1]);
-      if (males.length >= 1 && females.length >= 2) combinations.push([1, 2]);
-      if (males.length >= 2 && females.length >= 2) combinations.push([2, 2]);
-      return combinations[Math.floor(Math.random() * combinations.length)];
+    function isValidCombination(m, f) {
+      return (m === 1 && f >= 1) || (m === 2 && f === 2);
     }
 
-    function isUnavailable(name, day, time) {
-      return availability[name]?.[day]?.includes(time);
+    function getAvailable(name, day, mass, availability) {
+      return !availability[name] || availability[name][day]?.includes(mass);
     }
 
-    function selectKeyboardist(day, time) {
-      const available = choir.keyboard.filter(kb => !isUnavailable(kb, day, time));
-      const hybrids = hybridKeyboardists.filter(h => available.includes(h));
-      const regulars = available.filter(k => !hybrids.includes(k));
-
-      if (regulars.length) return shuffle(regulars)[0];
-
-      hybrids.sort((a, b) => hybridRotation[a] - hybridRotation[b]);
-      const selected = hybrids[0];
-      hybridRotation[selected]++;
+    function selectHybrid(day) {
+      const lastUsed = hybridHistory[day];
+      const selected = lastUsed === hybrid[0] ? hybrid[1] : hybrid[0];
+      hybridHistory[day] = selected;
       return selected;
     }
 
-    function selectSingers(day, time) {
-      let males = shuffle([...choir.male]);
-      let females = shuffle([...choir.female]);
-
-      if (time === '5:30 AM') {
-        males = shuffle(['Seby', ...choir.male.filter(m => m !== 'Seby')]);
-        females = shuffle(['Jincy', 'Biji', ...choir.female.filter(f => !['Jincy', 'Biji'].includes(f))]);
+    function generateTimetable() {
+      const output = [];
+      const used = { male: {}, female: {}, keyboard: {} };
+      let availability;
+      try {
+        availability = JSON.parse(document.getElementById("availabilityInput").value || "{}");
+      } catch (e) {
+        alert("Invalid JSON in availability input");
+        return;
       }
 
-      const [mCount, fCount] = getValidSingerCombination(males, females);
-      const selectedMales = males.slice(0, mCount);
-      const selectedFemales = females.slice(0, fCount);
+      days.forEach(day => {
+        output.push(day);
+        masses.forEach(mass => {
+          let requiredMale = 1, requiredFemale = 1;
+          if (mass !== "5:30 AM") requiredFemale++;
+          if (mass !== "5:30 AM") requiredMale = 2;
 
-      const singers = [...selectedMales, ...selectedFemales];
+          let valid = false, combo;
+          const fm = shuffle(singers.male.filter(n => getAvailable(n, day, mass, availability)));
+          const ff = shuffle(singers.female.filter(n => getAvailable(n, day, mass, availability)));
 
-      if (time === '5:30 AM') {
-        singers.forEach(s => { if (morningSpecials.includes(s)) specialMorningCount[s]++; });
-      }
+          const maxTry = 30;
+          for (let i = 0; i < maxTry; i++) {
+            const m = shuffle(fm).slice(0, requiredMale);
+            const f = shuffle(ff).slice(0, requiredFemale);
+            if (isValidCombination(m.length, f.length)) {
+              combo = { male: m, female: f };
+              valid = true;
+              break;
+            }
+          }
 
-      return singers;
+          if (!valid) {
+            output.push(` ${mass}: Not enough singers.`);
+            return;
+          }
+
+          combo.male.forEach(name => used.male[name] = (used.male[name] || 0) + 1);
+          combo.female.forEach(name => used.female[name] = (used.female[name] || 0) + 1);
+
+          if (mass === "5:30 AM") {
+            [...combo.male, ...combo.female].forEach(name => {
+              if (earlyMassQuota[name] !== undefined) earlyMassQuota[name]++;
+            });
+          }
+
+          const kbOptions = shuffle(keyboardists.filter(k => getAvailable(k, day, mass, availability)));
+          const massException = fixedAssignments[day]?.[mass]?.exclude || [];
+          const filteredKB = kbOptions.filter(k => !massException.includes(k));
+
+          let kb = filteredKB.find(k => !hybrid.includes(k)) || selectHybrid(day);
+          used.keyboard[kb] = (used.keyboard[kb] || 0) + 1;
+
+          output.push(` ${mass}: ${combo.male.join(", ")} | ${combo.female.join(", ")} | Keyboard: ${kb}`);
+        });
+        output.push("");
+      });
+
+      localStorage.setItem("choirHistory", JSON.stringify(used));
+      localStorage.setItem("hybridRotation", JSON.stringify(hybridHistory));
+      document.getElementById("output").textContent = output.join("\n");
     }
 
-    function generateTimetable() {
-      const tbody = document.querySelector('#timetable tbody');
-      const log = document.getElementById('assignmentLog');
-      tbody.innerHTML = '';
-      log.textContent = '';
+    function copyTimetable() {
+      const text = document.getElementById("output").textContent;
+      navigator.clipboard.writeText(text).then(() => alert("Timetable copied!"));
+    }
 
-      assignments.length = 0;
-      Object.keys(memberAssignments).forEach(m => memberAssignments[m] = []);
-
-      for (const day of days) {
-        for (const time of times) {
-          const singers = selectSingers(day, time);
-          const keyboardist = selectKeyboardist(day, time);
-
-          const row = document.createElement('tr');
-          row.innerHTML = `<td>${day}</td><td>${time}</td><td>${singers.join(', ')}</td><td>${keyboardist}</td>`;
-          tbody.appendChild(row);
-
-          const record = { day, time, singers, keyboardist };
-          assignments.push(record);
-
-          [...singers, keyboardist].forEach(name => {
-            if (!memberAssignments[name]) memberAssignments[name] = [];
-            memberAssignments[name].push(`${day} ${time}`);
-          });
-        }
-      }
-
-      let logText = '';
-      for (const [member, assigned] of Object.entries(memberAssignments)) {
-        logText += `${member}: ${assigned.join(', ')}\n`;
-      }
-      log.textContent = logText;
+    function downloadCSV() {
+      const text = document.getElementById("output").textContent;
+      const blob = new Blob([text], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "choir_timetable.csv";
+      a.click();
+      URL.revokeObjectURL(url);
     }
   </script>
 </body>
