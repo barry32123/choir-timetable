@@ -2,153 +2,405 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Choir Timetable Generator</title>
+  <title>Choir Timetable Generator - St. Mary's Forane Church</title>
   <style>
-    body { font-family: Arial, sans-serif; padding: 1rem; }
-    button { margin: 0.5rem 0; }
-    pre { background: #f4f4f4; padding: 1rem; white-space: pre-wrap; word-wrap: break-word; }
-    textarea { width: 100%; height: 150px; margin-top: 10px; }
+    body { font-family: Arial, sans-serif; margin: 2rem; background: #f5f7fa; }
+    h1, h2 { text-align: center; }
+    button { margin: 10px; padding: 10px 20px; font-size: 16px; cursor: pointer; }
+    .mass-entry { background: #fff; border: 1px solid #ddd; padding: 10px; margin: 10px 0; border-radius: 8px; }
+    .log-box { background: #eef; padding: 10px; margin-top: 30px; border-radius: 8px; }
+    pre { white-space: pre-wrap; word-wrap: break-word; font-size: 14px; }
   </style>
 </head>
 <body>
-  <h1>Choir Timetable Generator</h1>
-  <button onclick="generateTimetable()">Generate Timetable</button>
-  <button onclick="copyTimetable()">Copy Timetable</button>
-  <button onclick="downloadCSV()">Download CSV</button>
-  <pre id="output"></pre>
-  <h2>Member Availability (JSON Format)</h2>
-  <textarea id="availabilityInput" placeholder="Paste availability JSON here or leave empty for default."></textarea>
 
-  <script>
-    const singers = {
-      male: ["Seby", "Sebastian", "Roy", "Phijo", "Shaji", "Robert", "Don", "Aibel", "Atul"],
-      female: ["Anu", "Angel", "Jemcy", "Sini", "Priya", "Dona", "Soyal", "Jincy", "Biji", "Christy", "Sneha"]
-    };
+<h1>St. Mary's Choir Timetable Generator</h1>
+<div style="text-align:center;">
+  <button onclick="generateTimetable()">🎵 Generate Timetable</button>
+  <button onclick="copyTimetable()">📋 Copy Timetable</button>
+</div>
 
-    const keyboardists = ["Abraham Sn", "Abraham Jr.", "Davis", "Sebastian", "Shaji"];
-    const hybrid = ["Sebastian", "Shaji"];
+<h2>This Week's Timetable</h2>
+<div id="timetable"></div>
 
-    let history = JSON.parse(localStorage.getItem("choirHistory") || "{}");
-    let hybridHistory = JSON.parse(localStorage.getItem("hybridRotation") || "{}");
+<div class="log-box">
+  <h2>📖 Assignment Log (View-Only)</h2>
+  <pre id="logDisplay"></pre>
+</div>
 
-    const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-    const masses = ["5:30 AM", "10:00 AM", "5:30 PM"];
+<script>
+// === Member Definitions ===
+const members = {
+  maleSingers: [
+    { name: "seby", earlyOnly: true },
+    { name: "sebastian" },
+    { name: "roy" },
+    { name: "phijo" },
+    { name: "shaji" },
+    { name: "robert" },
+    { name: "don" },
+    { name: "aibel", friday10amUnavailable: true },
+    { name: "ajone", friday10amUnavailable: true },
+    { name: "atul", friday10amUnavailable: true },
+  ],
+  femaleSingers: [
+    { name: "anu" },
+    { name: "angel", friday10amUnavailable: true },
+    { name: "jemcy", friday10amUnavailable: true },
+    { name: "sini" },
+    { name: "priya" },
+    { name: "dona", friday10amUnavailable: true },
+    { name: "soyal", friday10amUnavailable: true },
+    { name: "jincy", earlyOnly: true },
+    { name: "biji", earlyOnly: true },
+    { name: "christy", friday10amUnavailable: true },
+    { name: "sneha", friday10amUnavailable: true },
+  ],
+  keyboardists: [
+    { name: "abraham sn", friday10amUnavailable: true },
+    { name: "abraham jr", friday10amUnavailable: true },
+    { name: "davis" },
+    { name: "sebastian", hybrid: true },
+    { name: "shaji", hybrid: true },
+  ],
+};
 
-    const fixedAssignments = {
-      "Friday": {
-        "10:00 AM": { exclude: ["Abraham Sn"] },
-        "5:30 PM": { exclude: ["Abraham Sn"] }
+const weeklyMasses = {
+  "Monday": ["5:30am", "7am"],
+  "Tuesday": ["5:30am", "7am"],
+  "Wednesday": ["5:30am", "7am"],
+  "Thursday": ["5:30am", "7am"],
+  "Friday": ["5:30am", "7am", "10am", "5:30pm"],
+  "Saturday": ["5:30am", "7am"],
+  "Sunday": ["5:30am", "7am", "10am", "5pm"],
+};
+
+const massesWithKeyboard = {
+  "Friday": ["7am", "10am", "5:30pm"],
+  "Saturday": ["7am"],
+  "Sunday": ["7am", "10am", "5pm"]
+};
+
+const usedToday = {};
+const usageCounter = {};
+const assignmentLog = [];
+
+function isAvailable(member, day, time) {
+  if (member.earlyOnly && time !== "5:30am") return false;
+  if (member.friday10amUnavailable && day === "Friday" && time === "10am") return false;
+  return true;
+}
+
+function getEligibleMembers(list, day, time) {
+  return list.filter(m => isAvailable(m, day, time));
+}
+
+function markUsed(member, day) {
+  if (!usedToday[day]) usedToday[day] = new Set();
+  usedToday[day].add(member.name);
+  usageCounter[member.name] = (usageCounter[member.name] || 0) + 1;
+}
+
+function hasBeenUsedToday(member, day) {
+  return usedToday[day] && usedToday[day].has(member.name);
+}
+
+function pickRandomMembers(candidates, count, day) {
+  const eligible = candidates.filter(m => !hasBeenUsedToday(m, day));
+  const shuffled = eligible.sort(() => 0.5 - Math.random());
+  // If not enough fresh members, allow previously used
+  if (shuffled.length < count) {
+    const more = candidates.filter(m => hasBeenUsedToday(m, day));
+    const shuffledMore = more.sort(() => 0.5 - Math.random());
+    return shuffled.concat(shuffledMore).slice(0, count);
+  }
+  return shuffled.slice(0, count);
+}
+
+function assignChoir(day, time) {
+  const malePool = getEligibleMembers(members.maleSingers, day, time);
+  const femalePool = getEligibleMembers(members.femaleSingers, day, time);
+
+  let config = { males: 1, females: 1 };  // default for early morning 5:30am
+
+  // Maximize 1m1f for early morning 5:30 am masses
+  if (time === "5:30am") {
+    config = { males: 1, females: 1 };
+  } else if ((day === "Friday" && ["7am", "5:30pm"].includes(time)) || (day === "Sunday" && time === "7am")) {
+    config = Math.random() < 0.8 ? { males: 2, females: 2 } : { males: 1, females: 1 };
+  } else {
+    config = Math.random() < 0.5 ? { males: 1, females: 2 } : { males: 1, females: 1 };
+  }
+
+  const selectedMales = pickRandomMembers(malePool, config.males, day);
+  const selectedFemales = pickRandomMembers(femalePool, config.females, day);
+  [...selectedMales, ...selectedFemales].forEach(m => markUsed(m, day));
+
+  let keyboardist = null;
+  if (massesWithKeyboard[day]?.includes(time)) {
+    // Prioritize keyboardists who are hybrid and not assigned yet this week
+    const keyboardPool = members.keyboardists.filter(k =>
+      isAvailable(k, day, time) && !hasBeenUsedToday(k, day)
+    );
+
+    // Sort hybrid keyboardists by least usage so they get a fair chance
+    const hybridKeys = keyboardPool.filter(k => k.hybrid);
+    const nonHybridKeys = keyboardPool.filter(k => !k.hybrid);
+
+    let candidateKeys = [...hybridKeys.sort((a, b) => (usageCounter[a.name] || 0) - (usageCounter[b.name] || 0))];
+
+    if (candidateKeys.length === 0) {
+      // If no fresh hybrid keys, use all keys sorted by usage
+      candidateKeys = keyboardPool.sort((a, b) => (usageCounter[a.name] || 0) - (usageCounter[b.name] || 0));
+    }
+
+    // If still no candidates, allow those who have been used today (fallback)
+    if (candidateKeys.length === 0) {
+      candidateKeys = members.keyboardists.filter(k => isAvailable(k, day, time));
+    }
+
+    keyboardist = candidateKeys[0] || null;
+
+    if (keyboardist) markUsed(keyboardist, day);
+  }
+
+  return {
+    day, time,
+    singers: [...selectedMales, ...selectedFemales].map(m => m.name),
+    keyboard: keyboardist ? keyboardist.name : "—"
+  };
+}
+
+function ensureAbrahamSnSunday() {
+  const sundayMassesWithKeyboard = assignmentLog.filter(
+    entry => entry.day === "Sunday" && massesWithKeyboard["Sunday"].includes(entry.time)
+  );
+
+  let abrahamAssignedIndex = sundayMassesWithKeyboard.findIndex(entry => entry.keyboard === "abraham sn");
+
+  if (abrahamAssignedIndex === -1) {
+    let maxUsage = -1;
+    let indexToReplace = -1;
+    sundayMassesWithKeyboard.forEach((entry, idx) => {
+      const kbName = entry.keyboard;
+      if (kbName && kbName !== "—") {
+        const usage = usageCounter[kbName] || 0;
+        if (usage > maxUsage) {
+          maxUsage = usage;
+          indexToReplace = idx;
+        }
       }
-    };
+    });
 
-    const earlyMassQuota = {
-      "Seby": 0, "Jincy": 0, "Biji": 0
-    };
+    if (indexToReplace !== -1) {
+      const massToReplace = sundayMassesWithKeyboard[indexToReplace];
+      const globalIndex = assignmentLog.findIndex(
+        e => e.day === massToReplace.day && e.time === massToReplace.time
+      );
 
-    function shuffle(array) {
-      let a = [...array];
-      for (let i = a.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [a[i], a[j]] = [a[j], a[i]];
+      if (globalIndex !== -1) {
+        // Replace keyboardist with abraham sn
+        const oldKb = assignmentLog[globalIndex].keyboard;
+        if (oldKb && oldKb !== "—") usageCounter[oldKb] = Math.max(0, (usageCounter[oldKb] || 1) - 1);
+
+        assignmentLog[globalIndex].keyboard = "abraham sn";
+        usageCounter["abraham sn"] = (usageCounter["abraham sn"] || 0) + 1;
       }
-      return a;
     }
+  }
+}
 
-    function isValidCombination(m, f) {
-      return (m === 1 && f >= 1) || (m === 2 && f === 2);
-    }
+function ensureHybridKeyboardAssignment() {
+  // Hybrid keyboardists: Sebastian & Shaji
+  const hybridNames = ["sebastian", "shaji"];
 
-    function getAvailable(name, day, mass, availability) {
-      return !availability[name] || availability[name][day]?.includes(mass);
-    }
+  // Check if assigned keyboard at least once in the week
+  const assignedHybrid = assignmentLog.some(e => hybridNames.includes(e.keyboard));
 
-    function selectHybrid(day) {
-      const lastUsed = hybridHistory[day];
-      const selected = lastUsed === hybrid[0] ? hybrid[1] : hybrid[0];
-      hybridHistory[day] = selected;
-      return selected;
-    }
+  if (!assignedHybrid) {
+    // Assign to a keyboard slot with the least used keyboardist (excluding Abraham Sn if possible)
+    const keyboardMasses = assignmentLog.filter(e =>
+      massesWithKeyboard[e.day]?.includes(e.time)
+    );
 
-    function generateTimetable() {
-      const output = [];
-      const used = { male: {}, female: {}, keyboard: {} };
-      let availability;
-      try {
-        availability = JSON.parse(document.getElementById("availabilityInput").value || "{}");
-      } catch (e) {
-        alert("Invalid JSON in availability input");
-        return;
+    // Sort by keyboardist usage ascending to pick one with max usage to replace
+    keyboardMasses.sort((a, b) => {
+      const usageA = usageCounter[a.keyboard] || 0;
+      const usageB = usageCounter[b.keyboard] || 0;
+      return usageB - usageA; // descending usage (replace one with highest usage)
+    });
+
+    for (const mass of keyboardMasses) {
+      if (mass.keyboard !== "abraham sn") {
+        // Replace keyboardist with one hybrid keyboardist (the one with least usage)
+        const hybridUsage = hybridNames.map(name => ({name, usage: usageCounter[name] || 0}))
+                                       .sort((a,b) => a.usage - b.usage);
+        const chosenHybrid = hybridUsage[0].name;
+
+        const oldKb = mass.keyboard;
+        if (oldKb && oldKb !== "—") usageCounter[oldKb] = Math.max(0, (usageCounter[oldKb] || 1) - 1);
+
+        mass.keyboard = chosenHybrid;
+        usageCounter[chosenHybrid] = (usageCounter[chosenHybrid] || 0) + 1;
+        break;
       }
+    }
+  }
+}
 
-      days.forEach(day => {
-        output.push(day);
-        masses.forEach(mass => {
-          let requiredMale = 1, requiredFemale = 1;
-          if (mass !== "5:30 AM") requiredFemale++;
-          if (mass !== "5:30 AM") requiredMale = 2;
+function ensureSebyEarlyMorning() {
+  // Seby must get at least 1 early morning mass (5:30am)
+  const earlyMasses = assignmentLog.filter(e => e.time === "5:30am");
 
-          let valid = false, combo;
-          const fm = shuffle(singers.male.filter(n => getAvailable(n, day, mass, availability)));
-          const ff = shuffle(singers.female.filter(n => getAvailable(n, day, mass, availability)));
+  const sebyAssignedCount = earlyMasses.reduce((acc, curr) => {
+    return acc + (curr.singers.includes("seby") ? 1 : 0);
+  }, 0);
 
-          const maxTry = 30;
-          for (let i = 0; i < maxTry; i++) {
-            const m = shuffle(fm).slice(0, requiredMale);
-            const f = shuffle(ff).slice(0, requiredFemale);
-            if (isValidCombination(m.length, f.length)) {
-              combo = { male: m, female: f };
-              valid = true;
-              break;
-            }
-          }
-
-          if (!valid) {
-            output.push(` ${mass}: Not enough singers.`);
+  if (sebyAssignedCount === 0) {
+    for (const mass of earlyMasses) {
+      // Replace one male singer with Seby
+      const maleSingers = mass.singers.filter(s => members.maleSingers.some(m => m.name === s));
+      for (const male of maleSingers) {
+        if (male !== "seby") {
+          const index = mass.singers.indexOf(male);
+          if (index !== -1) {
+            mass.singers[index] = "seby";
+            usageCounter["seby"] = (usageCounter["seby"] || 0) + 1;
+            usageCounter[male] = Math.max(0, (usageCounter[male] || 1) - 1);
             return;
           }
-
-          combo.male.forEach(name => used.male[name] = (used.male[name] || 0) + 1);
-          combo.female.forEach(name => used.female[name] = (used.female[name] || 0) + 1);
-
-          if (mass === "5:30 AM") {
-            [...combo.male, ...combo.female].forEach(name => {
-              if (earlyMassQuota[name] !== undefined) earlyMassQuota[name]++;
-            });
-          }
-
-          const kbOptions = shuffle(keyboardists.filter(k => getAvailable(k, day, mass, availability)));
-          const massException = fixedAssignments[day]?.[mass]?.exclude || [];
-          const filteredKB = kbOptions.filter(k => !massException.includes(k));
-
-          let kb = filteredKB.find(k => !hybrid.includes(k)) || selectHybrid(day);
-          used.keyboard[kb] = (used.keyboard[kb] || 0) + 1;
-
-          output.push(` ${mass}: ${combo.male.join(", ")} | ${combo.female.join(", ")} | Keyboard: ${kb}`);
-        });
-        output.push("");
-      });
-
-      localStorage.setItem("choirHistory", JSON.stringify(used));
-      localStorage.setItem("hybridRotation", JSON.stringify(hybridHistory));
-      document.getElementById("output").textContent = output.join("\n");
+        }
+      }
     }
+  }
+}
 
-    function copyTimetable() {
-      const text = document.getElementById("output").textContent;
-      navigator.clipboard.writeText(text).then(() => alert("Timetable copied!"));
-    }
+function ensureBijiJincyEarlyMorning() {
+  // Biji and Jincy must get at least 2 early morning mass (5:30am) assignments each
+  const earlyMasses = assignmentLog.filter(e => e.time === "5:30am");
 
-    function downloadCSV() {
-      const text = document.getElementById("output").textContent;
-      const blob = new Blob([text], { type: "text/csv" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "choir_timetable.csv";
-      a.click();
-      URL.revokeObjectURL(url);
+  function countAssignments(name) {
+    return earlyMasses.reduce((acc, curr) => acc + (curr.singers.includes(name) ? 1 : 0), 0);
+  }
+
+  let bijiCount = countAssignments("biji");
+  let jincyCount = countAssignments("jincy");
+
+  // Function to assign a female early mass to given name if not enough
+  function assignFemale(name) {
+    for (const mass of earlyMasses) {
+      if (mass.singers.includes(name)) continue; // Already assigned here
+      // Replace a female singer who is not biji/jincy
+      for (let i = 0; i < mass.singers.length; i++) {
+        if (members.femaleSingers.some(f => f.name === mass.singers[i]) && mass.singers[i] !== "biji" && mass.singers[i] !== "jincy") {
+          mass.singers[i] = name;
+          return true;
+        }
+      }
     }
-  </script>
+    return false;
+  }
+
+  while (bijiCount < 2) {
+    if (!assignFemale("biji")) break;  // No replacement possible
+    bijiCount++;
+  }
+
+  while (jincyCount < 2) {
+    if (!assignFemale("jincy")) break;
+    jincyCount++;
+  }
+}
+
+function generateTimetable() {
+  usedToday = {};
+  usageCounter = {};
+  assignmentLog.length = 0;
+
+  for (const [day, times] of Object.entries(weeklyMasses)) {
+    for (const time of times) {
+      const entry = assignChoir(day, time);
+      assignmentLog.push(entry);
+    }
+  }
+  // Reset
+  Object.keys(usedToday).forEach(k => usedToday[k].clear());
+  Object.keys(usageCounter).forEach(k => usageCounter[k] = 0);
+  assignmentLog.length = 0;
+
+  let timetableHTML = "";
+
+  // Assign for each mass of each day
+  for (const day of Object.keys(weeklyMasses)) {
+    for (const time of weeklyMasses[day]) {
+      const assign = assignChoir(day, time);
+      assignmentLog.push(assign);
+    }
+  }
+
+  // Enforce special rules
+  ensureAbrahamSnSunday();
+  ensureHybridKeyboardAssignment();
+  ensureSebyEarlyMorning();
+
+  renderTimetable();
+  renderLog();
+
+  // Build timetable HTML after adjustments
+  timetableHTML = assignmentLog.map(assign => 
+    <div class="mass-entry">
+      <strong>${assign.day} - ${assign.time}</strong><br/>
+      Singers: ${assign.singers.join(", ")}<br/>
+      Keyboard: ${assign.keyboard}
+    </div>
+  ).join("");
+
+  document.getElementById("timetable").innerHTML = timetableHTML;
+
+  updateLogDisplay();
+}
+  
+function renderTimetable() {
+  const container = document.getElementById("timetable");
+  container.innerHTML = "";
+  assignmentLog.forEach(entry => {
+    const div = document.createElement("div");
+    div.className = "mass-entry";
+    div.innerHTML = `<strong>${entry.day} ${entry.time}</strong><br/>
+      🎤 Singers: ${entry.singers.join(", ")}<br/>
+      🎹 Keyboard: ${entry.keyboard}`;
+    container.appendChild(div);
+  });
+}
+
+function renderLog() {
+  const logBox = document.getElementById("logDisplay");
+  logBox.textContent = assignmentLog.map(entry =>
+    `${entry.day} ${entry.time} - Singers: ${entry.singers.join(", ")}, Keyboard: ${entry.keyboard}`
+  ).join("\n");
+}
+
+function updateLogDisplay() {
+  const lines = assignmentLog.map(entry => {
+    return ${entry.day} ${entry.time} | Singers: ${entry.singers.join(", ")} | Keyboard: ${entry.keyboard};
+  });
+  document.getElementById("logDisplay").textContent = lines.join("\n");
+}
+
+function copyTimetable() {
+  const text = assignmentLog.map(entry =>
+    `${entry.day} ${entry.time} - Singers: ${entry.singers.join(", ")}, Keyboard: ${entry.keyboard}`
+  ).join("\n");
+  navigator.clipboard.writeText(text).then(() => {
+    alert("Timetable copied to clipboard!");
+  });
+}
+
+
+// Initial call
+generateTimetable();
+
+</script>
+
 </body>
 </html>
