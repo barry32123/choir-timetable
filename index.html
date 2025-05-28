@@ -115,13 +115,13 @@ function assignChoir(day, time) {
   const malePool = getEligibleMembers(members.maleSingers, day, time);
   const femalePool = getEligibleMembers(members.femaleSingers, day, time);
 
+  // Maximum option: Prefer 1m and 1f for early morning 5:30am masses
   let config = { males: 1, females: 2 };
-
-  if ((day === "Friday" && ["7am", "5:30pm"].includes(time)) || (day === "Sunday" && time === "7am")) {
-    config = Math.random() < 0.8 ? { males: 2, females: 2 } : { males: 1, females: 2 };
-  } else if (time === "5:30am") {
-    // Change here: 85% chance for 1m 1f, 15% chance for 1m 2f
-    config = Math.random() < 0.9 ? { males: 1, females: 1 } : { males: 1, females: 2 };
+  if (time === "5:30am") {
+    // max 1 male and 1 female for early morning
+    config = { males: 1, females: 1 };
+  } else if ((day === "Friday" && ["7am", "5:30pm"].includes(time)) || (day === "Sunday" && time === "7am")) {
+    config = Math.random() < 0.8 ? { males: 2, females: 2 } : { males: 1, females: 1 };
   }
 
   const selectedMales = pickRandomMembers(malePool, config.males, day);
@@ -146,13 +146,13 @@ function assignChoir(day, time) {
   };
 }
 
-
 function generateTimetable() {
   assignmentLog.length = 0;
   Object.keys(usedToday).forEach(k => delete usedToday[k]);
 
   for (const name in usageCounter) usageCounter[name] = 0;
 
+  // Assign for whole week first
   Object.keys(weeklyMasses).forEach(day => {
     weeklyMasses[day].forEach(time => {
       const result = assignChoir(day, time);
@@ -160,8 +160,58 @@ function generateTimetable() {
     });
   });
 
+  // Ensure Abraham Sn assigned on Sunday at least once
+  ensureAbrahamSnSunday();
+
   saveLog();
   displayTimetable();
+}
+
+function ensureAbrahamSnSunday() {
+  // Check if Abraham Sn is assigned on any Sunday mass
+  const sundayMasses = assignmentLog.filter(entry => entry.day === "Sunday");
+  const assignedOnSunday = sundayMasses.some(entry => entry.keyboard === "abraham sn");
+
+  if (!assignedOnSunday) {
+    // Find Sunday Mass with keyboardist assigned who has highest usage count (to replace)
+    let maxUsage = -1;
+    let indexToReplace = -1;
+
+    sundayMasses.forEach((entry, idx) => {
+      const kbName = entry.keyboard;
+      if (kbName && kbName !== "—") {
+        const usage = usageCounter[kbName] || 0;
+        if (usage > maxUsage) {
+          maxUsage = usage;
+          indexToReplace = idx;
+        }
+      }
+    });
+
+    if (indexToReplace !== -1) {
+      // Replace that keyboardist with Abraham Sn
+      const massToReplace = sundayMasses[indexToReplace];
+      // Update usageCounter: decrement replaced, increment Abraham Sn
+      if (massToReplace.keyboard) {
+        usageCounter[massToReplace.keyboard] = Math.max(0, usageCounter[massToReplace.keyboard] - 1);
+      }
+      usageCounter["abraham sn"] = (usageCounter["abraham sn"] || 0) + 1;
+
+      // Update assignmentLog and usedToday accordingly
+      for (let i = 0; i < assignmentLog.length; i++) {
+        if (assignmentLog[i].day === massToReplace.day && assignmentLog[i].time === massToReplace.time) {
+          // Remove old keyboardist from usedToday set
+          if (usedToday[massToReplace.day]) {
+            usedToday[massToReplace.day].delete(massToReplace.keyboard);
+            usedToday[massToReplace.day].add("abraham sn");
+          }
+
+          assignmentLog[i].keyboard = "abraham sn";
+          break;
+        }
+      }
+    }
+  }
 }
 
 function displayTimetable() {
@@ -189,18 +239,26 @@ function copyTimetable() {
 
 function saveLog() {
   const logData = JSON.parse(localStorage.getItem("choirLogs") || "[]");
-  logData.push({ date: new Date().toLocaleString(), assignments: assignmentLog });
+  logData.push({ date: new Date().toLocaleString(), log: assignmentLog });
   localStorage.setItem("choirLogs", JSON.stringify(logData));
 }
 
 function updateLogDisplay() {
-  const logs = JSON.parse(localStorage.getItem("choirLogs") || "[]");
-  const logText = logs.slice(-5).map(l => 
-    `🗓️ ${l.date}\n` + l.assignments.map(e => `- ${e.day} ${e.time}: ${e.singers.join(", ")} | Key: ${e.keyboard}`).join("\n")
-  ).join("\n\n");
-
-  document.getElementById("logDisplay").textContent = logText;
+  const logDisplay = document.getElementById("logDisplay");
+  const logData = JSON.parse(localStorage.getItem("choirLogs") || "[]");
+  logDisplay.textContent = logData.map(e =>
+    `🗓 ${e.date}\n${e.log.map(entry =>
+      `${entry.day} ${entry.time} | Singers: ${entry.singers.join(", ")} | Keyboard: ${entry.keyboard}`
+    ).join("\n")}`).join("\n\n");
 }
+
+// Initialize usageCounter for all members on page load
+(function initUsageCounter() {
+  [...members.maleSingers, ...members.femaleSingers, ...members.keyboardists].forEach(m => {
+    usageCounter[m.name] = 0;
+  });
+})();
+
 </script>
 
 </body>
